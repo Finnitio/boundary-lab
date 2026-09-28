@@ -132,8 +132,10 @@ def test_front_and_rear_driver_surfaces_infer_one_shared_x_cut_driver() -> None:
 
     inferred = infer_component_symmetry(
         (
-            _boundary(front, "Diaphragm", "boundary:front"),
+            _boundary(front, "cone", "boundary:front"),
+            _boundary(front, "surround", "boundary:front-surround"),
             _boundary(rear, "cone", "boundary:rear"),
+            _boundary(rear, "Surround", "boundary:rear-surround"),
         ),
         {front.id: front, rear.id: rear},
         "x",
