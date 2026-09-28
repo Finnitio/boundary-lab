@@ -1069,6 +1069,7 @@ def test_electrodynamic_component_collection_uses_voltage_port_and_preserves_aut
         "mechanical:diaphragm-velocity",
         "electrical:voice-coil-current",
         "acoustic:interface-average-normal-velocity",
+        "acoustic:interface-radiated-pressure",
     ]
     assert "components:electrodynamic-transducers" in {domain.id for domain in prepared.result_domains}
     assert session.request.solver_options["transducer_reference_voltage_v"] == pytest.approx(2.83)
@@ -1300,6 +1301,7 @@ def test_coupled_ui_request_uses_excitation_basis_and_polar_field_points() -> No
         "observation:vertical-polar",
         FEM_VOLUME_DOMAIN_ID,
         "domain:interfaces",
+        "domain:radiation-sources",
     }
     fem_domain = next(domain for domain in prepared.result_domains if domain.id == FEM_VOLUME_DOMAIN_ID)
     assert fem_domain.coordinates["points_m"].shape == (842, 3)
