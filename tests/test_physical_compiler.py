@@ -851,7 +851,9 @@ def test_skram_multi_chamber_model_compiles_with_shared_fractional_driver(
     assert len(compiled.interfaces) == 2
     assert compiled.components[0].boundary_ids == (
         "boundary:front-radiator",
+        "boundary:front-surround",
         "boundary:rear-radiator",
+        "boundary:rear-surround",
     )
     assert session.request.solver_options["symmetry"] == "x"
 
@@ -1523,7 +1525,8 @@ def test_skram_multi_chamber_cuda_condensed_solve(tmp_path: Path) -> None:
     quantities = {quantity.id: quantity for quantity in result.quantities}
     velocity = quantities["output:velocity"].values[0, 0]
     current = quantities["output:current"].values[0, 0]
-    electrical_impedance = 6.0 - 1j * 2.0 * np.pi * 200.0 * 0.0005
+    assert result.diagnostics["phasor_convention"] == "exp(+i omega t)"
+    electrical_impedance = 6.0 + 1j * 2.0 * np.pi * 200.0 * 0.0005
     electrical_residual = (
         abs(electrical_impedance * current + 7.0 * velocity - DEFAULT_TRANSDUCER_REFERENCE_VOLTAGE_V)
         / DEFAULT_TRANSDUCER_REFERENCE_VOLTAGE_V
@@ -1869,7 +1872,7 @@ def _skram_fixture_system(tmp_path: Path) -> PhysicalSystem:
     conformed_exterior, _ = conform_bem_interface_to_fem(
         front_mesh,
         exterior_mesh,
-        fem_interface_name="Interface",
+        fem_interface_name="interface",
         bem_interface_name="FrontChamberInterface",
         merge_tolerance=1e-8,
         symmetry_mode="x",
@@ -1951,7 +1954,18 @@ def _skram_fixture_system(tmp_path: Path) -> PhysicalSystem:
             group=PhysicalGroupRef(
                 mesh_id="mesh:skram-front",
                 dimension=2,
-                name="Diaphragm",
+                name="cone",
+            ),
+            kind=BoundaryKind.MOVING,
+        ),
+        Boundary(
+            id="boundary:front-surround",
+            name="Front surround",
+            region_id="region:skram-front",
+            group=PhysicalGroupRef(
+                mesh_id="mesh:skram-front",
+                dimension=2,
+                name="surround",
             ),
             kind=BoundaryKind.MOVING,
         ),
@@ -1962,7 +1976,7 @@ def _skram_fixture_system(tmp_path: Path) -> PhysicalSystem:
             group=PhysicalGroupRef(
                 mesh_id="mesh:skram-front",
                 dimension=2,
-                name="Interface",
+                name="interface",
             ),
             kind=BoundaryKind.INTERFACE,
         ),
@@ -1985,6 +1999,17 @@ def _skram_fixture_system(tmp_path: Path) -> PhysicalSystem:
                 mesh_id="mesh:skram-rear",
                 dimension=2,
                 name="cone",
+            ),
+            kind=BoundaryKind.MOVING,
+        ),
+        Boundary(
+            id="boundary:rear-surround",
+            name="Rear surround",
+            region_id="region:skram-rear",
+            group=PhysicalGroupRef(
+                mesh_id="mesh:skram-rear",
+                dimension=2,
+                name="Surround",
             ),
             kind=BoundaryKind.MOVING,
         ),
@@ -2057,9 +2082,17 @@ def _skram_fixture_system(tmp_path: Path) -> PhysicalSystem:
         kind=ComponentKind.ELECTRODYNAMIC_TRANSDUCER,
         boundary_ids=(
             "boundary:front-radiator",
+            "boundary:front-surround",
             "boundary:rear-radiator",
+            "boundary:rear-surround",
         ),
         parameters={
+            "boundary_motion_weights": {
+                "boundary:front-radiator": 1.0,
+                "boundary:front-surround": 0.3981071705534972,
+                "boundary:rear-radiator": 1.0,
+                "boundary:rear-surround": 0.3981071705534972,
+            },
             "re_ohm": 6.0,
             "le_h": 0.0005,
             "bl_n_per_a": 7.0,

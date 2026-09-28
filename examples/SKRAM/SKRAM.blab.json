@@ -7,7 +7,7 @@
       "level_db": 0.0,
       "lpf": {},
       "polarity": 1,
-      "voltage_v": 28.3
+      "voltage_v": 2.83
     }
   },
   "component_channel_by_id": {
@@ -123,19 +123,6 @@
         "group": {
           "dimension": 2,
           "mesh_id": "mesh:skramfrontchamber",
-          "name": "Diaphragm",
-          "tag": null
-        },
-        "id": "boundary:region-front-chamber:diaphragm",
-        "kind": "moving",
-        "name": "Diaphragm",
-        "parameters": {},
-        "region_id": "region:front-chamber"
-      },
-      {
-        "group": {
-          "dimension": 2,
-          "mesh_id": "mesh:skramfrontchamber",
           "name": "FrontChamber_boundary",
           "tag": null
         },
@@ -149,12 +136,38 @@
         "group": {
           "dimension": 2,
           "mesh_id": "mesh:skramfrontchamber",
-          "name": "Interface",
+          "name": "cone",
+          "tag": null
+        },
+        "id": "boundary:region-front-chamber:cone",
+        "kind": "moving",
+        "name": "cone",
+        "parameters": {},
+        "region_id": "region:front-chamber"
+      },
+      {
+        "group": {
+          "dimension": 2,
+          "mesh_id": "mesh:skramfrontchamber",
+          "name": "interface",
           "tag": null
         },
         "id": "boundary:region-front-chamber:interface",
         "kind": "interface",
-        "name": "Interface",
+        "name": "interface",
+        "parameters": {},
+        "region_id": "region:front-chamber"
+      },
+      {
+        "group": {
+          "dimension": 2,
+          "mesh_id": "mesh:skramfrontchamber",
+          "name": "surround",
+          "tag": null
+        },
+        "id": "boundary:region-front-chamber:surround",
+        "kind": "moving",
+        "name": "surround",
         "parameters": {},
         "region_id": "region:front-chamber"
       },
@@ -183,9 +196,9 @@
         "name": "Lining",
         "parameters": {
           "wall_impedance": {
-            "flow_resistivity_pa_s_per_m2": 1000.0,
+            "flow_resistivity_pa_s_per_m2": 2000.0,
             "model": "miki",
-            "thickness_m": 0.025
+            "thickness_m": 0.03
           }
         },
         "region_id": "region:rear-chamber"
@@ -207,6 +220,19 @@
         "group": {
           "dimension": 2,
           "mesh_id": "mesh:skramrearchamber",
+          "name": "Surround",
+          "tag": null
+        },
+        "id": "boundary:region-rear-chamber:surround",
+        "kind": "moving",
+        "name": "Surround",
+        "parameters": {},
+        "region_id": "region:rear-chamber"
+      },
+      {
+        "group": {
+          "dimension": 2,
+          "mesh_id": "mesh:skramrearchamber",
           "name": "cone",
           "tag": null
         },
@@ -220,7 +246,9 @@
     "components": [
       {
         "boundary_ids": [
-          "boundary:region-front-chamber:diaphragm",
+          "boundary:region-front-chamber:cone",
+          "boundary:region-front-chamber:surround",
+          "boundary:region-rear-chamber:surround",
           "boundary:region-rear-chamber:cone"
         ],
         "id": "component:21sw152-4",
@@ -229,8 +257,10 @@
         "parameters": {
           "bl_n_per_a": 32.5,
           "boundary_motion_weights": {
-            "boundary:region-front-chamber:diaphragm": 1.0,
-            "boundary:region-rear-chamber:cone": 1.0
+            "boundary:region-front-chamber:cone": 1.0,
+            "boundary:region-front-chamber:surround": 0.3981071705534972,
+            "boundary:region-rear-chamber:cone": 1.0,
+            "boundary:region-rear-chamber:surround": 0.3981071705534972
           },
           "cms_m_per_n": 5e-05,
           "fractional_symmetry_axes": [
@@ -240,8 +270,8 @@
           "mmd_kg": 0.412,
           "motion_axis": [
             0.0,
-            3.936591800432725e-06,
-            0.9999999999922518
+            1.8927360286310965e-05,
+            0.9999999998208775
           ],
           "motion_profile": "rigid_translation",
           "physical_driver_orbit_count": 1,
@@ -274,7 +304,7 @@
         "bounded_boundary_id": "boundary:region-front-chamber:interface",
         "coordinate_tolerance_m": 1e-08,
         "id": "interface:interface-frontchamberinterface",
-        "name": "Interface / FrontChamberInterface",
+        "name": "interface / FrontChamberInterface",
         "unbounded_boundary_id": "boundary:region-exterior-air:skramexterior:frontchamberinterface"
       },
       {
@@ -391,14 +421,14 @@
   },
   "project_preferences": {
     "balloon_angle_precision_deg": 2.5,
-    "freq_count": 200,
-    "freq_max_hz": 500,
+    "freq_count": 100,
+    "freq_max_hz": 250,
     "freq_min_hz": 20,
     "horizontal_normalization_angle": 0.0,
     "isobar_contour_step_db": 3.0,
     "normalized_channel_correction": false,
-    "polar_angle_step_deg": 5.0,
-    "polar_observation_distance_m": 1.0,
+    "polar_angle_step_deg": 1.0,
+    "polar_observation_distance_m": 2.5,
     "polar_smoothing": null,
     "spherical_sampling_enabled": true,
     "spin_horizontal_reference_angle": 0.0,
