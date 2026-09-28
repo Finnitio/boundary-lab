@@ -21,15 +21,15 @@ def test_s218bp_level_three_preflight_tracks_full_domain_storage() -> None:
 
     assert estimate.source_symmetry == "xy"
     assert estimate.symmetry_image_count == 4
-    # The current conformed fixture has 1110 quarter-domain nodes; welding
-    # its cut-plane images gives 4228 nodes and four copies of 2113 faces.
-    assert estimate.bem_node_count == 4228
-    assert estimate.bem_face_count == 8452
-    assert estimate.retained_fem_node_count == 3127
-    assert estimate.interface_flux_count == 1536
+    # Reflecting the updated quarter-domain fixture and welding its cut-plane
+    # images gives 1200 nodes and four copies of 599 faces.
+    assert estimate.bem_node_count == 1200
+    assert estimate.bem_face_count == 2396
+    assert estimate.retained_fem_node_count == 1079
+    assert estimate.interface_flux_count == 488
     assert estimate.transducer_count == 2
     assert estimate.excitation_count == 2
-    assert estimate.state_count == 4667
+    assert estimate.state_count == 1571
     assert estimate.rom_rank == 32
     assert estimate.parity_rom_numeric_bytes > 0
     assert estimate.parity_rom_package_bytes_estimate > estimate.parity_rom_numeric_bytes

@@ -62,6 +62,7 @@
       ]
     }
   ],
+  "max_spl_limits_by_channel": {},
   "observation_planes": [],
   "physical_system": {
     "boundaries": [
@@ -108,12 +109,12 @@
         "group": {
           "dimension": 2,
           "mesh_id": "mesh:rearchamber",
-          "name": "INTERFACE",
+          "name": "Interface",
           "tag": null
         },
         "id": "boundary:region-rear-chamber:interface",
         "kind": "interface",
-        "name": "INTERFACE",
+        "name": "Interface",
         "parameters": {},
         "region_id": "region:rear-chamber"
       },
@@ -160,13 +161,19 @@
         "group": {
           "dimension": 2,
           "mesh_id": "mesh:rearchamber",
-          "name": "WALLTREATMENT",
+          "name": "WallTreatment",
           "tag": null
         },
         "id": "boundary:region-rear-chamber:walltreatment",
         "kind": "rigid",
-        "name": "WALLTREATMENT",
-        "parameters": {},
+        "name": "WallTreatment",
+        "parameters": {
+          "wall_impedance": {
+            "flow_resistivity_pa_s_per_m2": 2000.0,
+            "model": "miki",
+            "thickness_m": 0.03
+          }
+        },
         "region_id": "region:rear-chamber"
       },
       {
@@ -220,6 +227,19 @@
         "name": "SideChamber_boundary",
         "parameters": {},
         "region_id": "region:side-chamber"
+      },
+      {
+        "group": {
+          "dimension": 2,
+          "mesh_id": "mesh:sidechamber",
+          "name": "Walltreatment",
+          "tag": null
+        },
+        "id": "boundary:region-side-chamber:walltreatment",
+        "kind": "rigid",
+        "name": "Walltreatment",
+        "parameters": {},
+        "region_id": "region:side-chamber"
       }
     ],
     "components": [
@@ -237,9 +257,9 @@
           "bl_n_per_a": 39.0,
           "boundary_motion_weights": {
             "boundary:region-rear-chamber:lfcone": 1.0,
-            "boundary:region-rear-chamber:lfsurround": 1.0,
+            "boundary:region-rear-chamber:lfsurround": 0.5623413251903491,
             "boundary:region-side-chamber:lfcone": 1.0,
-            "boundary:region-side-chamber:lfsurround": 1.0
+            "boundary:region-side-chamber:lfsurround": 0.5623413251903491
           },
           "cms_m_per_n": 8.3e-05,
           "fractional_symmetry_axes": [
@@ -248,9 +268,9 @@
           "le_h": 0.00385,
           "mmd_kg": 0.301,
           "motion_axis": [
-            1.0,
-            0.0,
-            0.0
+            0.9999999999893713,
+            -0.0,
+            -4.610590478629386e-06
           ],
           "motion_profile": "rigid_translation",
           "physical_driver_orbit_count": 2,
@@ -283,7 +303,7 @@
         "bounded_boundary_id": "boundary:region-rear-chamber:interface",
         "coordinate_tolerance_m": 1e-08,
         "id": "interface:interface-rearinterface",
-        "name": "INTERFACE / RearInterface",
+        "name": "Interface / RearInterface",
         "unbounded_boundary_id": "boundary:region-exterior-air:exterior:rearinterface"
       },
       {
@@ -335,7 +355,7 @@
     "metadata": {
       "component_editor": {
         "component:18ds115-4": {
-          "motion_axis_mode": "manual"
+          "motion_axis_mode": "automatic"
         }
       }
     },
