@@ -16,8 +16,10 @@ from typing import Callable, Iterator
 import numpy as np
 
 from blab.acoustic_materials import (
+    BOUNDARY_THERMOVISCOUS_LOSS_KEY,
     REGION_BULK_LOSS_FACTOR_KEY,
     WALL_IMPEDANCE_KEY,
+    boundary_thermoviscous_wall_losses,
     region_bulk_loss_factor,
     wall_impedance_parameters,
 )
@@ -469,13 +471,23 @@ def validate_coupled_capabilities(request: SystemSolveRequest) -> None:
     parameterized_boundaries = [
         boundary.id
         for boundary in system.boundaries
-        if boundary.parameters and set(boundary.parameters) != {WALL_IMPEDANCE_KEY}
+        if set(boundary.parameters) - {WALL_IMPEDANCE_KEY, BOUNDARY_THERMOVISCOUS_LOSS_KEY}
     ]
     if parameterized_boundaries:
         raise ValueError(
             "Coupled solver does not support the boundary parameters used by: " + ", ".join(parameterized_boundaries)
         )
     for boundary in system.boundaries:
+        model = boundary_thermoviscous_wall_losses(boundary.parameters)
+        if model != "off" and (
+            boundary.kind != BoundaryKind.RIGID
+            or next(r for r in system.regions if r.id == boundary.region_id).kind != AcousticRegionKind.BOUNDED_AIR
+            or WALL_IMPEDANCE_KEY in boundary.parameters
+            or any(boundary.id in c.boundary_ids for c in system.components)
+        ):
+            raise ValueError(
+                f"Thermoviscous wall losses on '{boundary.id}' require an unlined, stationary rigid wall in bounded air."
+            )
         treatment = wall_impedance_parameters(boundary.parameters)
         if treatment is None:
             continue
@@ -638,7 +650,7 @@ def validate_interior_capabilities(request: SystemSolveRequest) -> None:
     parameterized_boundaries = [
         boundary.id
         for boundary in system.boundaries
-        if boundary.parameters and set(boundary.parameters) != {WALL_IMPEDANCE_KEY}
+        if set(boundary.parameters) - {WALL_IMPEDANCE_KEY, BOUNDARY_THERMOVISCOUS_LOSS_KEY}
     ]
     if parameterized_boundaries:
         raise ValueError(
@@ -646,6 +658,16 @@ def validate_interior_capabilities(request: SystemSolveRequest) -> None:
             + ", ".join(parameterized_boundaries)
         )
     for boundary in system.boundaries:
+        model = boundary_thermoviscous_wall_losses(boundary.parameters)
+        if model != "off" and (
+            boundary.kind != BoundaryKind.RIGID
+            or next(r for r in system.regions if r.id == boundary.region_id).kind != AcousticRegionKind.BOUNDED_AIR
+            or WALL_IMPEDANCE_KEY in boundary.parameters
+            or any(boundary.id in c.boundary_ids for c in system.components)
+        ):
+            raise ValueError(
+                f"Thermoviscous wall losses on '{boundary.id}' require an unlined, stationary rigid wall in bounded air."
+            )
         treatment = wall_impedance_parameters(boundary.parameters)
         if treatment is not None and boundary.kind != BoundaryKind.RIGID:
             raise ValueError(f"Wall impedance boundary '{boundary.id}' must use the rigid boundary assignment.")

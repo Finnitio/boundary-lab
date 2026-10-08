@@ -18,6 +18,7 @@ from blab.acoustic_impedance import (
 from blab.acoustic_materials import (
     REGION_BULK_LOSS_FACTOR_KEY,
     WALL_IMPEDANCE_KEY,
+    boundary_thermoviscous_wall_losses,
     region_bulk_loss_factor,
     wall_impedance_parameters,
 )
@@ -296,6 +297,19 @@ class PhysicalSystemCompiler:
             self._validate_json_mapping(
                 boundary.parameters, owner=f"Boundary '{boundary.id}' parameters", issues=issues
             )
+            try:
+                model = boundary_thermoviscous_wall_losses(boundary.parameters)
+                if model != "off" and (
+                    region.kind != AcousticRegionKind.BOUNDED_AIR
+                    or boundary.kind != BoundaryKind.RIGID
+                    or WALL_IMPEDANCE_KEY in boundary.parameters
+                    or any(boundary.id in component.boundary_ids for component in system.components)
+                ):
+                    issues.append(
+                        f"Boundary '{boundary.id}' thermoviscous wall losses require an unlined, stationary rigid wall in bounded air."
+                    )
+            except ValueError as exc:
+                issues.append(f"Boundary '{boundary.id}' {exc}")
             if WALL_IMPEDANCE_KEY in boundary.parameters:
                 if region.kind != AcousticRegionKind.BOUNDED_AIR:
                     issues.append(f"Boundary '{boundary.id}' wall impedance requires a bounded-air region.")
