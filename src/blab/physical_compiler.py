@@ -18,6 +18,7 @@ from blab.acoustic_impedance import (
 from blab.acoustic_materials import (
     REGION_BULK_LOSS_FACTOR_KEY,
     WALL_IMPEDANCE_KEY,
+    boundary_thermoviscous_wall_losses,
     region_bulk_loss_factor,
     wall_impedance_parameters,
 )
@@ -55,6 +56,7 @@ from blab.physical_model import (
     PhysicsAssumption,
     ResolvedPhysicalGroup,
 )
+from blab.source_motion import prescribed_source_parameters
 from blab.symmetry import snap_points_to_symmetry_planes
 
 
@@ -117,6 +119,13 @@ class PhysicalSystemCompiler:
             assumptions=self._assumptions(system),
             source_model_version=system.model_version,
             metadata=metadata,
+            contract_version=2
+            if any(
+                component.kind == ComponentKind.IDEAL_VELOCITY_SOURCE
+                and component.parameters.get("motion_profile") == "rigid_translation"
+                for component in compiled_components
+            )
+            else 1,
         )
 
     def _compile_components(
@@ -136,6 +145,15 @@ class PhysicalSystemCompiler:
         symmetry_factor = 2 ** len({"off": (), "x": ("x",), "xy": ("x", "y")}[symmetry_mode])
         for component in system.components:
             if component.kind == ComponentKind.IDEAL_VELOCITY_SOURCE:
+                try:
+                    parameters = prescribed_source_parameters(
+                        component.parameters,
+                        symmetry=symmetry_mode,
+                        exterior=not any(region.kind == AcousticRegionKind.BOUNDED_AIR for region in system.regions),
+                    )
+                except ValueError as exc:
+                    raise PhysicalModelCompileError(f"Component '{component.name}': {exc}") from exc
+                component = replace(component, parameters=parameters)
                 exterior_boundaries = tuple(
                     boundaries_by_id[boundary_id]
                     for boundary_id in component.boundary_ids
@@ -150,16 +168,23 @@ class PhysicalSystemCompiler:
                             symmetry_factor,
                             boundary_motion_weights=dict(component.parameters.get("boundary_motion_weights", {})),
                             mesh_cache=mesh_cache,
+                            motion_axis=parameters.get("motion_axis"),
                         )
                     except (ComponentSymmetryInferenceError, TypeError, ValueError) as exc:
                         raise PhysicalModelCompileError(
                             f"Could not infer driven area for component '{component.name}': {exc}"
                         ) from exc
+                    if area_m2 == 0.0:
+                        # Tangential motion is valid but has no impedance normalization area.
+                        compiled.append(component)
+                        continue
                     normalization[component.id] = AcousticImpedanceNormalization(
                         component_id=component.id,
                         component_name=component.name,
                         effective_area_m2=area_m2,
-                        area_kind="weighted_physical_surface",
+                        area_kind=(
+                            "weighted_projected_surface" if "motion_axis" in parameters else "weighted_physical_surface"
+                        ),
                     )
                 compiled.append(component)
                 continue
@@ -193,7 +218,6 @@ class PhysicalSystemCompiler:
                     parameters["motion_axis"],
                     inference.surface_completion_factor,
                     boundary_motion_weights=dict(parameters.get("boundary_motion_weights", {})),
-                    boundary_side_keys={boundary.id: boundary.region_id for boundary in boundaries},
                     mesh_cache=mesh_cache,
                     projected_geometry_cache=projected_geometry_cache,
                 )
@@ -273,6 +297,19 @@ class PhysicalSystemCompiler:
             self._validate_json_mapping(
                 boundary.parameters, owner=f"Boundary '{boundary.id}' parameters", issues=issues
             )
+            try:
+                model = boundary_thermoviscous_wall_losses(boundary.parameters)
+                if model != "off" and (
+                    region.kind != AcousticRegionKind.BOUNDED_AIR
+                    or boundary.kind != BoundaryKind.RIGID
+                    or WALL_IMPEDANCE_KEY in boundary.parameters
+                    or any(boundary.id in component.boundary_ids for component in system.components)
+                ):
+                    issues.append(
+                        f"Boundary '{boundary.id}' thermoviscous wall losses require an unlined, stationary rigid wall in bounded air."
+                    )
+            except ValueError as exc:
+                issues.append(f"Boundary '{boundary.id}' {exc}")
             if WALL_IMPEDANCE_KEY in boundary.parameters:
                 if region.kind != AcousticRegionKind.BOUNDED_AIR:
                     issues.append(f"Boundary '{boundary.id}' wall impedance requires a bounded-air region.")

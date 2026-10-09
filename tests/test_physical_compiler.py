@@ -44,6 +44,7 @@ from blab.solvers.coupled_backend import (
     DEFAULT_TRANSDUCER_REFERENCE_VOLTAGE_V,
     CoupledProductionBackend,
     CoupledReferenceBackend,
+    PhysicalSystemProductionBackend,
 )
 from blab.system_contract import (
     OutputRequest,
@@ -108,6 +109,15 @@ def test_compiler_records_weighted_area_for_exterior_prescribed_velocity() -> No
     assert record.relative_side_mismatch is None
 
 
+def test_compiler_rejects_axial_prescribed_source_in_coupled_system() -> None:
+    system = _fixture_system()
+    component = replace(
+        system.components[0], parameters={"motion_profile": "rigid_translation", "motion_axis": [0, 0, 1]}
+    )
+    with pytest.raises(PhysicalModelCompileError, match="exterior-only"):
+        PhysicalSystemCompiler().compile(replace(system, components=(component,)))
+
+
 @pytest.mark.parametrize(
     "backend,expected",
     [
@@ -161,10 +171,14 @@ def test_legacy_unused_boundary_deserializes_as_rigid() -> None:
 
 
 def test_compiled_system_and_request_round_trip_through_versioned_contract() -> None:
-    compiled = PhysicalSystemCompiler().compile(_fixture_system())
+    authoring_system = _fixture_system()
+    compiled = PhysicalSystemCompiler().compile(authoring_system)
     compiled_wire = compiled_system_to_dict(compiled)
     restored = compiled_system_from_dict(compiled_wire)
     assert restored == compiled
+    assert authoring_system.components[0].parameters["motion_profile"] == "uniform"
+    assert "motion_profile" not in compiled_wire["components"][0]["parameters"]
+    assert compiled_wire["contract_version"] == 1
     assert "signals" not in compiled_wire
     assert compiled_wire["excitation_ports"][0]["kind"] == "normal_velocity"
 
@@ -2344,3 +2358,80 @@ def test_repeated_compilation_reuses_shared_meshes_without_changing_contract(mon
     second = PhysicalSystemCompiler().compile(_fixture_system())
     assert reads == []
     assert compiled_system_to_dict(first) == compiled_system_to_dict(second)
+
+
+def test_cram_example_compiles_with_both_diaphragm_sides_in_one_region() -> None:
+    project = REPO_ROOT / "examples" / "2x12_CRAM" / "2x12_CRAM.blab.json"
+    system = physical_system_from_dict(json.loads(project.read_text())["physical_system"])
+    system = replace(
+        system, meshes=tuple(replace(mesh, file=str(project.parent / mesh.file)) for mesh in system.meshes)
+    )
+    compiled = PhysicalSystemCompiler().compile(system, symmetry_mode="x")
+    records = normalization_records(compiled.metadata)
+    for component in system.components:
+        area = records[component.id]
+        assert area.effective_area_m2 == pytest.approx(0.06229375, rel=1e-6)
+        assert area.positive_side_area_m2 == pytest.approx(area.negative_side_area_m2)
+        assert area.relative_side_mismatch == pytest.approx(0.0, abs=1e-12)
+
+
+@pytest.mark.parametrize("model", ["thin_boundary_layer", "off"])
+@pytest.mark.parametrize("interior_only", [False, True])
+def test_compiler_and_backend_preserve_thermoviscous_model(model, interior_only) -> None:
+    system = _fixture_system()
+    configured = replace(
+        system,
+        boundaries=tuple(
+            replace(b, parameters={"thermoviscous_wall_losses": model}) if b.id == "boundary:wall" else b
+            for b in system.boundaries
+        ),
+    )
+    if interior_only:
+        interior_ids = {r.id for r in configured.regions if r.kind == AcousticRegionKind.BOUNDED_AIR}
+        configured = replace(
+            configured,
+            regions=tuple(r for r in configured.regions if r.id in interior_ids),
+            boundaries=tuple(
+                replace(b, kind=BoundaryKind.RIGID) if b.kind == BoundaryKind.INTERFACE else b
+                for b in configured.boundaries
+                if b.region_id in interior_ids
+            ),
+            interfaces=(),
+        )
+    # Exercise project serialization as well as compilation and backend acceptance.
+    configured = physical_system_from_dict(physical_system_to_dict(configured))
+    compiled = PhysicalSystemCompiler().compile(configured)
+    request = SystemSolveRequest(
+        compiled_system=compiled, frequencies_hz=(500.0,), excitation_port_ids=("excitation:radiator",)
+    )
+    session = PhysicalSystemProductionBackend(bem_backend="cpu").create_system_session(request)
+    boundaries = session.request.compiled_system.boundaries
+    assert next(b for b in boundaries if b.id == "boundary:wall").parameters["thermoviscous_wall_losses"] == model
+    assert all("thermoviscous_wall_losses" not in b.parameters for b in boundaries if b.id != "boundary:wall")
+    beat_contract.validate_solve_request(system_solve_request_to_dict(session.request))
+
+
+@pytest.mark.parametrize("ineligible", ["exterior", "moving", "interface", "termination", "lining", "component"])
+def test_compiler_rejects_ineligible_thermoviscous_wall(ineligible) -> None:
+    system = _fixture_system()
+    wall = next(b for b in system.boundaries if b.id == "boundary:wall")
+    parameters = {"thermoviscous_wall_losses": "thin_boundary_layer"}
+    if ineligible == "lining":
+        parameters.update(miki_wall_impedance_parameters())
+    wall = replace(wall, parameters=parameters)
+    if ineligible in {"moving", "interface", "termination"}:
+        wall = replace(
+            wall,
+            kind={
+                "moving": BoundaryKind.MOVING,
+                "interface": BoundaryKind.INTERFACE,
+                "termination": BoundaryKind.PLANE_WAVE_TUBE_TERMINATION,
+            }[ineligible],
+        )
+    if ineligible == "exterior":
+        wall = replace(wall, region_id=next(r.id for r in system.regions if r.kind == AcousticRegionKind.UNBOUNDED_AIR))
+    configured = replace(system, boundaries=tuple(wall if b.id == wall.id else b for b in system.boundaries))
+    if ineligible == "component":
+        configured = replace(configured, components=(replace(system.components[0], boundary_ids=(wall.id,)),))
+    with pytest.raises(PhysicalModelCompileError, match="thermoviscous wall losses require"):
+        PhysicalSystemCompiler().compile(configured)

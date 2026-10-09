@@ -14,7 +14,9 @@ from typing import Any, Callable, Iterable
 
 import numpy as np
 
+from blab.generators.base import generated_mesh_id
 from blab.generators.registry import restore_generator_document
+from blab.generators.resources import active_assembly_system, generated_mesh_entries
 from blab.live import build_log_frequencies
 from blab.observation_planes import observation_planes_from_payload
 from blab.phasor import SOLVER_PHASOR_CONVENTION
@@ -38,7 +40,7 @@ from blab.solve_results.model import INTERFACE_RADIATION_ID, RADIATION_SOURCE_DO
 from blab.solvers.beat_engine_runtime import DEFAULT_BEAT_ENGINE_CUDA_PROJECT
 from blab.solvers.coupled_backend import PhysicalSystemProductionBackend, validate_solve_plan
 from blab.solvers.engine_distribution import backend_catalog
-from blab.solvers.registry import normalize_backend_id
+from blab.solvers.registry import normalize_backend_id, packaged_backend_available
 from blab.system_contract import (
     OutputRequest,
     SystemFrequencyResult,
@@ -108,13 +110,39 @@ def load_headless_project(path: str | Path) -> HeadlessProject:
         symmetry = "off"
     # System authoring stores canonical generated assets. Resolve the same
     # full/reduced variants selected by GUI preview and solve preparation.
+    documents = generator_documents_from_payload(payload.get("generator_documents"))
     generated = {
         generator_mesh_name(document): document
-        for document in generator_documents_from_payload(payload.get("generator_documents"))
-        if document.mesh_enabled and document.artifact is not None
+        for document in documents
+        if document.mesh_enabled and document.artifact is not None and not document.artifact.meshes
     }
+    assembly_resources = {}
+    system = active_assembly_system(system, documents)
+    for document in documents:
+        if document.mesh_enabled and document.artifact is not None and document.artifact.meshes:
+            result = restore_generator_document(document)
+            assembly_resources.update(
+                {
+                    generated_mesh_id(document.id, mesh.id): entry
+                    for mesh, entry in zip(
+                        result.meshes, generated_mesh_entries(document, result, symmetry), strict=True
+                    )
+                }
+            )
     resources = []
     for resource in system.meshes:
+        entry = assembly_resources.get(resource.id)
+        if entry is not None:
+            resources.append(
+                replace(
+                    resource,
+                    file=entry.source_file,
+                    mesh_data=entry.mesh_data,
+                    scale_to_m=entry.scale_factor,
+                    translation_m=tuple(value / 1000 for value in entry.translation_mm),
+                )
+            )
+            continue
         document = generated.get(resource.name)
         if document is None:
             resources.append(resource)
@@ -169,7 +197,11 @@ def resolve_headless_backend(
     if requested not in HEADLESS_BACKEND_IDS:
         raise ValueError(f"Unknown headless backend {backend_id!r}; expected " + ", ".join(HEADLESS_BACKEND_IDS))
     if requested != HEADLESS_BACKEND_AUTO:
+        if not packaged_backend_available(requested):
+            raise ValueError(f"{requested} is not included in this Boundary Lab installation.")
         return requested
+    if not packaged_backend_available("beat_cuda"):
+        return "beat_cpu"
     if not _command_available("nvidia-smi") or not _command_available(julia_executable):
         return "beat_cpu"
     command = [
@@ -186,6 +218,7 @@ def resolve_headless_backend(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=max(float(cuda_probe_timeout_s), 0.1),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):

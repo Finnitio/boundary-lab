@@ -18,8 +18,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from blab.generators.ath import ath_source_text, with_ath_source_text
+from blab.generators.ath import ATH_PROVIDER_ID, ath_source_text, with_ath_source_text
 from blab.generators.registry import restore_generator_document
+from blab.generators.resources import generated_mesh_names as document_mesh_names
 from blab.observation_planes import observation_planes_from_payload
 from blab.physical_model import (
     physical_system_from_dict,
@@ -160,7 +161,9 @@ class ProjectWorkflowController(QObject):
                 continue
             source_file = str(item.get("source_file", "")).strip()
             name = str(item.get("name", "")).strip()
-            generated_mesh_names = {generator_mesh_name(document) for document in self._project.generator_documents}
+            generated_mesh_names = {
+                name for document in self._project.generator_documents for name in document_mesh_names(document)
+            }
             if not source_file or not name or name in generated_mesh_names:
                 continue
             translation = item.get("translation_mm", [0.0, 0.0, 0.0])
@@ -486,7 +489,7 @@ class ProjectWorkflowController(QObject):
 
     @Slot()
     def import_config(self) -> None:
-        path = self._view.choose_open_file("Import Waveguide Design", ATH_CONFIG_FILTER)
+        path = self._view.choose_open_file("Import Ath Design", ATH_CONFIG_FILTER)
         if path is None:
             return
 
@@ -501,7 +504,7 @@ class ProjectWorkflowController(QObject):
                 if document_id
                 else self._inputs.active_generator_document()
             )
-            if document is None:
+            if document is None or document.provider_id != ATH_PROVIDER_ID:
                 document = new_generator_document(
                     unique_generator_name(path.stem, project.generator_documents),
                     config_text,
@@ -520,7 +523,7 @@ class ProjectWorkflowController(QObject):
 
     @Slot()
     def export_config(self) -> None:
-        path = self._view.choose_save_file("Export Waveguide Design", ATH_CONFIG_FILTER, "waveguide.cfg")
+        path = self._view.choose_save_file("Export Ath Design", ATH_CONFIG_FILTER, "waveguide.cfg")
         if path is None:
             return
 

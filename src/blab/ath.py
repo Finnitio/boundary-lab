@@ -203,9 +203,9 @@ class AthProcessRunner:
         log_path = output_dir / "ath.log"
         config_path.write_text(config_text, encoding="utf-8")
 
-        creationflags = 0
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         if os.name == "nt":
-            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
         self._cancel_requested = False
         self._process = subprocess.Popen(
@@ -271,6 +271,9 @@ class AthProcessRunner:
         result_path.unlink(missing_ok=True)
         command = [
             sys.executable,
+            "-B",
+            "-X",
+            "utf8",
             "-m",
             "blab.ath_gmsh_worker",
             "--geo",
@@ -289,6 +292,7 @@ class AthProcessRunner:
             str(result_path),
         ]
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+        creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
         self._process = subprocess.Popen(
             command,
             cwd=output_dir,
@@ -335,6 +339,7 @@ class AthProcessRunner:
                     text=True,
                     check=False,
                     timeout=5.0,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
                 if completed.returncode == 0:
                     return

@@ -53,9 +53,9 @@ def register_generator(info: GeneratorBackendInfo) -> None:
     if info.provider_id in _BACKENDS or any(
         p.manifest and p.manifest.id == info.provider_id for p in provider_catalog().packages
     ):
-        raise ValueError(f"Geometry provider {info.provider_id!r} is already registered.")
+        raise ValueError(f"Generator Plugin {info.provider_id!r} is already registered.")
     if not info.label.strip() or not callable(info.factory):
-        raise ValueError("A geometry provider needs a label and callable factory.")
+        raise ValueError("A Generator Plugin needs a label and callable factory.")
     _BACKENDS[info.provider_id] = info
 
 
@@ -83,6 +83,16 @@ def create_generator(provider_id: str, **kwargs: Any) -> GeneratorBackend:
 
 def restore_generator_document(document: GeneratorDocument) -> GeneratedGeometry | None:
     artifact = document.artifact
+    if artifact is not None and artifact.meshes:
+        return GeneratedGeometry(
+            provider_id=document.provider_id,
+            output_dir=Path(artifact.output_dir),
+            mesh_path=None,
+            radiators=(),
+            meshes=artifact.meshes,
+            source_path=Path(artifact.source_path) if artifact.source_path else None,
+            provider_metadata=artifact.provider_metadata,
+        )
     if artifact is not None and artifact.mesh_data is not None:
         return GeneratedGeometry(
             provider_id=document.provider_id,

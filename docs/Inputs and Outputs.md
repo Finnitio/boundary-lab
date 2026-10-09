@@ -4,8 +4,9 @@ Boundary Lab project files use the `.blab.json` extension.
 
 Project files store:
 
-- waveguide design documents, including generator provider ID and provider-owned source
+- generator design documents, including plugin ID and plugin-owned source
 - generated mesh enabled state, scale, and XYZ offset
+- named generated FEM/BEM assembly resources and plugin provenance (schema 10)
 - imported mesh rows, including absolute `.msh` paths
 - whether the exterior region's mesh parts should be stitched into one solve mesh
 - an editable physical-system graph for exterior BEM and coupled BEM/FEM models
@@ -17,7 +18,7 @@ Project files do not store:
 - solved BEM results
 - exported plots
 - solver backend, GMRES tolerance, and Burton-Miller preferences
-- generated geometry file contents
+- external generated geometry file contents (in-memory mesh snapshots are embedded)
 
 ## Example Shape
 
@@ -49,7 +50,7 @@ Project files do not store:
 ## Loading Projects
 
 Loading a project updates the design editor, mesh, channel, and physical-system
-configuration. It does not automatically run a geometry provider or start a
+configuration. It does not automatically run a Generator Plugin or start a
 solve. Older source-config projects are converted to an exterior physical
 system as soon as their mesh artifacts are available. Pending compatibility
 assignments are retained when a generated artifact must be rebuilt first.

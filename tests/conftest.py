@@ -60,6 +60,26 @@ def _isolate_qsettings(tmp_path_factory) -> None:
     assert pathlib.Path(settings.fileName()).is_relative_to(root)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_qt_windows():
+    """Destroy surviving test windows while Qt and Python are still fully alive."""
+    yield
+    if PYSIDE6_ERROR is not None:
+        return
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is not None:
+        # Some modules retain dialogs through signal callbacks or module globals.
+        # Leaving them to QApplication's interpreter-exit destruction can crash
+        # native Qt after pytest has already reported a successful session.
+        # Deferred deletion also handles popup windows owned by other widgets.
+        for window in app.topLevelWidgets():
+            window.deleteLater()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 @pytest.fixture(scope="session")
 def qapp():
     from PySide6.QtWidgets import QApplication
@@ -96,6 +116,9 @@ def _stub_mesh_preview_class():
 
         def load_mesh_configs(self, *args, **kwargs) -> None:
             self.loaded.append((args, kwargs))
+
+        def set_motion_directions_visible(self, visible: bool) -> None:
+            self.motion_directions_visible = visible
 
         def set_observation_planes(self, planes, *, selected_id=None) -> None:
             self.observation_planes = tuple(planes)

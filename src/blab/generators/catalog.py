@@ -24,6 +24,16 @@ def provider_roots() -> tuple[Path, ...]:
     return (APP_ROOT / "geometry_providers",)
 
 
+def bundled_provider_ids() -> tuple[str, ...]:
+    """Explicit first-party allowlist, never a trust claim from a manifest."""
+    path = APP_ROOT / "geometry_providers" / "vented_enclosure" / "provider.json"
+    try:
+        manifest = ProviderManifest.read(path)
+    except (OSError, ValueError):
+        return ()
+    return (manifest.id,) if manifest.id == "blab.vented_enclosure" else ()
+
+
 @dataclass(frozen=True)
 class ProviderManifest:
     id: str
@@ -118,7 +128,7 @@ class ProviderCatalog:
                     if key in self._failures:
                         package.error = self._failures[key]
                     if key in self.reserved or ids.count(key) > 1:
-                        package.error = f"Conflicting provider ID: {key}"
+                        package.error = f"Conflicting Generator Plugin ID: {key}"
                     loaded = self._loaded.get(key)
                     if loaded and loaded[:2] != (package.path, package.fingerprint):
                         package.error = "Package changed after loading; restart Boundary Lab."
@@ -133,12 +143,14 @@ class ProviderCatalog:
     def package(self, provider_id):
         matches = [p for p in self.packages if p.manifest and p.manifest.id == provider_id]
         if len(matches) != 1:
-            raise ValueError(f"Provider {provider_id!r} is missing or has conflicting packages.")
+            raise ValueError(
+                f"Generator Plugin {provider_id!r} is missing or has conflicting packages. Open Edit > Generator Plugins..."
+            )
         package = matches[0]
         if package.error:
             raise ValueError(package.error)
         if provider_id not in self.enabled:
-            raise ValueError(f"Provider {provider_id!r} is disabled. Enable it in Preferences.")
+            raise ValueError(f"Generator Plugin {provider_id!r} is disabled. Enable it in Edit > Generator Plugins...")
         return package
 
     def factory(self, provider_id, kind):

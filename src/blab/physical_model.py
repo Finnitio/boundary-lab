@@ -14,9 +14,10 @@ from typing import Any
 
 from blab.interface_conform import InterfaceTopologyMap
 from blab.mesh_data import MeshData
-from blab.solvers.engine_contract import COMPILED_SYSTEM_VERSION as COMPILED_SYSTEM_VERSION
 
 PHYSICAL_MODEL_VERSION = 1
+# Keep legacy systems on v1; the compiler selects v2 for axial velocity sources.
+COMPILED_SYSTEM_VERSION = 1
 
 
 JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]

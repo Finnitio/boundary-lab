@@ -16,8 +16,10 @@ from typing import Callable, Iterator
 import numpy as np
 
 from blab.acoustic_materials import (
+    BOUNDARY_THERMOVISCOUS_LOSS_KEY,
     REGION_BULK_LOSS_FACTOR_KEY,
     WALL_IMPEDANCE_KEY,
+    boundary_thermoviscous_wall_losses,
     region_bulk_loss_factor,
     wall_impedance_parameters,
 )
@@ -40,6 +42,7 @@ from blab.solvers.beat_engine_runtime import (
     julia_process_env,
     normalize_beat_engine_backend,
 )
+from blab.source_motion import prescribed_source_parameters
 from blab.system_contract import (
     SystemFrequencyResult,
     SystemSolveMetadata,
@@ -173,6 +176,7 @@ class CoupledSession:
             text=True,
             encoding="utf-8",
             env=environment,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         assert self._process.stdin is not None
         assert self._process.stdout is not None
@@ -467,13 +471,23 @@ def validate_coupled_capabilities(request: SystemSolveRequest) -> None:
     parameterized_boundaries = [
         boundary.id
         for boundary in system.boundaries
-        if boundary.parameters and set(boundary.parameters) != {WALL_IMPEDANCE_KEY}
+        if set(boundary.parameters) - {WALL_IMPEDANCE_KEY, BOUNDARY_THERMOVISCOUS_LOSS_KEY}
     ]
     if parameterized_boundaries:
         raise ValueError(
             "Coupled solver does not support the boundary parameters used by: " + ", ".join(parameterized_boundaries)
         )
     for boundary in system.boundaries:
+        model = boundary_thermoviscous_wall_losses(boundary.parameters)
+        if model != "off" and (
+            boundary.kind != BoundaryKind.RIGID
+            or next(r for r in system.regions if r.id == boundary.region_id).kind != AcousticRegionKind.BOUNDED_AIR
+            or WALL_IMPEDANCE_KEY in boundary.parameters
+            or any(boundary.id in c.boundary_ids for c in system.components)
+        ):
+            raise ValueError(
+                f"Thermoviscous wall losses on '{boundary.id}' require an unlined, stationary rigid wall in bounded air."
+            )
         treatment = wall_impedance_parameters(boundary.parameters)
         if treatment is None:
             continue
@@ -636,7 +650,7 @@ def validate_interior_capabilities(request: SystemSolveRequest) -> None:
     parameterized_boundaries = [
         boundary.id
         for boundary in system.boundaries
-        if boundary.parameters and set(boundary.parameters) != {WALL_IMPEDANCE_KEY}
+        if set(boundary.parameters) - {WALL_IMPEDANCE_KEY, BOUNDARY_THERMOVISCOUS_LOSS_KEY}
     ]
     if parameterized_boundaries:
         raise ValueError(
@@ -644,6 +658,16 @@ def validate_interior_capabilities(request: SystemSolveRequest) -> None:
             + ", ".join(parameterized_boundaries)
         )
     for boundary in system.boundaries:
+        model = boundary_thermoviscous_wall_losses(boundary.parameters)
+        if model != "off" and (
+            boundary.kind != BoundaryKind.RIGID
+            or next(r for r in system.regions if r.id == boundary.region_id).kind != AcousticRegionKind.BOUNDED_AIR
+            or WALL_IMPEDANCE_KEY in boundary.parameters
+            or any(boundary.id in c.boundary_ids for c in system.components)
+        ):
+            raise ValueError(
+                f"Thermoviscous wall losses on '{boundary.id}' require an unlined, stationary rigid wall in bounded air."
+            )
         treatment = wall_impedance_parameters(boundary.parameters)
         if treatment is not None and boundary.kind != BoundaryKind.RIGID:
             raise ValueError(f"Wall impedance boundary '{boundary.id}' must use the rigid boundary assignment.")
@@ -739,14 +763,7 @@ def validate_exterior_capabilities(request: SystemSolveRequest) -> None:
         )
     for component in system.components:
         _validate_boundary_motion_weights(component)
-        unsupported_parameters = set(component.parameters) - {"motion_profile", "boundary_motion_weights"}
-        if unsupported_parameters:
-            raise ValueError(
-                f"Exterior solver does not support component parameters on '{component.id}': "
-                + ", ".join(sorted(unsupported_parameters))
-            )
-        if component.parameters.get("motion_profile", "uniform") != "uniform":
-            raise ValueError(f"Exterior component '{component.id}' must use uniform prescribed motion.")
+        prescribed_source_parameters(component.parameters, symmetry=requested_symmetry)
     components_by_id = {component.id: component for component in system.components}
     incompatible_ports = [
         port.id

@@ -2,7 +2,7 @@
 
 The main window is a dockable workspace containing:
 
-- the waveguide design editor;
+- the Generator dock;
 - the 3D mesh preview;
 - horizontal and vertical isobars, acoustic impedance, on-axis response, and
   spinorama plots;
@@ -13,12 +13,27 @@ The main window is a dockable workspace containing:
 Panels can be resized, rearranged, floated, or closed. Reopen a closed panel
 from the **View** menu.
 
-## Waveguide Design Editor
+## Generator
 
-The waveguide design panel contains the editor supplied by the active geometry
-provider. The bundled Ath provider edits Ath `.cfg` text. Use **File > Import
-Waveguide Design...** and **Export Waveguide Design...** to exchange the active
-design with other tools.
+The **Generator** dock contains the editor supplied by each design's Generator
+Plugin. Reopen it with **View > Generator**. The bundled Ath plugin edits Ath
+`.cfg` text. Use **File > Import Ath Design...** and **Export Ath Design...** to
+exchange Ath designs with other tools. Importing while a different plugin's
+design is selected creates a separate Ath design; export is available for Ath
+designs only.
+
+Open **Edit > Generator Plugins...** to manage plugins and choose the **Default
+Generator Plugin** for new designs. Ath appears as **Built-in** and is always
+enabled. Use **Open install folder**, copy a plugin folder there, then **Rescan**
+and enable it. Only enable plugins you trust: they execute Python inside Boundary
+Lab. Click **OK** to save or **Cancel** to discard selection changes. Existing
+designs retain their plugin and saved source. If you disable the default, choose
+an enabled, available replacement before saving.
+
+Plugin management is unavailable during preparation, generation, or solving.
+Changes to loaded plugin code require a restart, shown in the plugin's status.
+Missing or disabled plugins preserve design source and generated results; enable
+or repair the plugin to edit and generate again.
 
 <img src="../assets/scripteditor.png" alt="Ath waveguide design editor" width="300">
 
@@ -74,7 +89,7 @@ rather than snapping to one curve.
 - **Save Project As** selects a new project path.
 - **Open Project** loads a `.blab.json` project.
 - **Open Recent** lists recently opened projects and can clear that history.
-- **Import/Export Waveguide Design** reads or writes the active provider's
+- **Import/Export Ath Design** reads or writes the active Ath design's
   editable design source.
 - **Export Polar Data** writes horizontal and vertical response text files.
 - **Export On-Axis Data** writes SPL and phase for each solved channel.
@@ -124,10 +139,42 @@ is treated as peak and compared with the peak displacement derived from the
 RMS solve basis. The linear model does not include thermal compression,
 amplifier voltage/current limits, or excursion-dependent motor parameters.
 
+New **Prescribed Velocity** components in exterior-only BEM projects default to
+a shared motion axis with **Automatic from surface normals** selected. Choose
+**Manual** to enter an X/Y/Z direction, and use **Flip** to reverse it. The direction is normalized;
+its length does not change the source speed. Automatic inference reports its
+confidence and requires a manual direction when the selected surfaces do not
+identify a clear axis. One axis applies to all surfaces selected for the component.
+
+Saved surface-normal sources retain their existing behavior: each face receives the same
+normal velocity, multiplied by its boundary's relative velocity weight. With a
+single direction, that velocity is additionally multiplied by the signed dot
+product of the face normal and the unit axis. Existing projects keep their
+surface-normal motion, indicated by a note in the component editor. The editor
+has no velocity-motion selector. Interior FEM and coupled FEM?BEM projects support only
+surface-normal prescribed sources. Under X or XY symmetry, a prescribed axis
+must lie in all active symmetry planes.
+
+Use **View > Show Motion Directions** to inspect saved axial assignments in the
+Mesh Preview. One yellow arrow per component shows its positive mechanical
+direction before channel polarity or phase. For saved surface-normal sources,
+the arrow shows the local normal at a representative face. Legacy driven
+surfaces without a physical-component model are included. Arrow lengths are
+illustrative, not velocity magnitudes. The arrow follows a visible assigned
+surface, including symmetry images, and is offset toward the camera so reversed
+mesh winding cannot bury it. Other geometry still occludes it; hide enclosure
+surfaces to inspect an enclosed driver. Surface hover text identifies the motion
+assignment. The toggle
+starts off and remains selected across preview rebuilds during the application
+session. No solve is required.
+
 The **Acoustic Impedance** dock reports dimensionless normalized acoustic load
 impedance, `Z / (rho*c*Sd)`. For exterior-only prescribed-velocity sources,
 `Sd` is the symmetry-completed physical surface area weighted by each boundary's
-motion coefficient. For electrodynamic transducers, it is the average projected
+motion coefficient. For single-direction prescribed sources, it is the sum of
+absolute projected face areas with the same weights and physical symmetry
+copies. Tangential motion with zero projected area can still be solved, but
+normalized impedance is unavailable. For electrodynamic transducers, it is the average projected
 area of the two diaphragm sides; Boundary Lab warns before solving if those
 areas differ by more than 10%. Coupled FEM-BEM solves report each transducer's
 net acoustic self load, including its interior and exterior loading; the other
@@ -244,7 +291,7 @@ current status message.
 
 ### Generate
 
-**Generate (F7)** runs the active design through its geometry provider. With
+**Generate (F7)** runs the active design through its Generator Plugin. With
 Ath, Boundary Lab stages the design script, captures Gmsh geometry from Ath's
 blab mode, meshes and cleans it in a cancellable worker, and loads the final
 surface mesh into the project and preview. **Stop (Shift+F5)** terminates either

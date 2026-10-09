@@ -31,8 +31,10 @@ from PySide6.QtWidgets import (
 )
 
 from blab.acoustic_materials import (
+    BOUNDARY_THERMOVISCOUS_LOSS_KEY,
     FEM_BULK_LOSS_FACTOR_OPTIONS,
     REGION_BULK_LOSS_FACTOR_KEY,
+    boundary_thermoviscous_wall_losses,
     region_bulk_loss_factor,
     wall_impedance_parameters,
 )
@@ -51,6 +53,7 @@ from blab.interface_conform import (
     conform_bem_interface_to_fem,
 )
 from blab.mesh_inventory import AvailableSystemMesh, inspect_system_mesh_variants, inspect_system_meshes
+from blab.paths import working_runs_root
 from blab.physical_model import (
     AcousticInterface,
     AcousticRegion,
@@ -234,7 +237,7 @@ class SystemConfigDialog(QDialog):
         self._restored_resources_by_mesh_name: dict[str, MeshResource] = {}
         self._symmetry_mode = normalize_symmetry(symmetry_mode)
         self._interface_output_root = (
-            Path.cwd() / "runs" / "imported_meshes" if interface_output_root is None else Path(interface_output_root)
+            working_runs_root() / "imported_meshes" if interface_output_root is None else Path(interface_output_root)
         )
         self._interfaces = list(system.interfaces if system is not None else ())
         self._existing_regions = {region.id: region for region in (() if system is None else system.regions)}
@@ -342,9 +345,9 @@ class SystemConfigDialog(QDialog):
         layout.addLayout(row)
 
     def _build_boundaries_tab(self) -> None:
-        self.boundaries_table = QTableWidget(0, 5)
+        self.boundaries_table = QTableWidget(0, 6)
         self.boundaries_table.setHorizontalHeaderLabels(
-            ["Region", "Mesh", "Surface Group", "Assignment", "Wall Impedance"]
+            ["Region", "Mesh", "Surface Group", "Assignment", "Wall Impedance", "Thermoviscous wall losses"]
         )
         self.boundaries_table.verticalHeader().setVisible(False)
         self.boundaries_table.setAlternatingRowColors(True)
@@ -353,6 +356,7 @@ class SystemConfigDialog(QDialog):
         self.boundaries_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.boundaries_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.boundaries_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.boundaries_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         note = QLabel(
             "Classify every surface used by a region. Boundary Lab auto-detects interface pairs when assigned here."
         )
@@ -714,11 +718,32 @@ class SystemConfigDialog(QDialog):
             )
         )
         self.boundaries_table.setCellWidget(row, 4, impedance_button)
+        thermoviscous_combo = QComboBox()
+        thermoviscous_combo.addItem("Off", "off")
+        thermoviscous_combo.addItem("Thin boundary layer", "thin_boundary_layer")
+        thermoviscous_combo.setCurrentIndex(
+            thermoviscous_combo.findData(boundary_thermoviscous_wall_losses(parameters))
+        )
+        impedance_button.setProperty("thermoviscous_combo", thermoviscous_combo)
+        self.boundaries_table.setCellWidget(row, 5, thermoviscous_combo)
+        thermoviscous_combo.currentIndexChanged.connect(
+            lambda _index, button=impedance_button, loss=thermoviscous_combo: self._store_thermoviscous_selection(
+                button, loss
+            )
+        )
         self._refresh_wall_impedance_button(
             impedance_button,
             combo,
             region["kind"] == AcousticRegionKind.BOUNDED_AIR,
         )
+
+    @staticmethod
+    def _store_thermoviscous_selection(button: QPushButton, combo: QComboBox) -> None:
+        parameters = dict(button.property("boundary_parameters") or {})
+        parameters.pop(BOUNDARY_THERMOVISCOUS_LOSS_KEY, None)
+        if combo.currentData() != "off":
+            parameters[BOUNDARY_THERMOVISCOUS_LOSS_KEY] = combo.currentData()
+        button.setProperty("boundary_parameters", parameters)
 
     @staticmethod
     def _refresh_wall_impedance_button(button: QPushButton, assignment: QComboBox, bounded: bool) -> None:
@@ -730,12 +755,21 @@ class SystemConfigDialog(QDialog):
             f"{float(treatment['flow_resistivity_pa_s_per_m2']):,.0f} Pa·s/m²"
         )
         button.setEnabled(bounded and assignment.currentData() == BoundaryKind.RIGID)
+        loss = button.property("thermoviscous_combo")
+        if isinstance(loss, QComboBox):
+            eligible = bounded and assignment.currentData() == BoundaryKind.RIGID and treatment is None
+            if not eligible:
+                loss.setCurrentIndex(0)
+            loss.setEnabled(eligible)
 
     def _edit_wall_impedance(self, button: QPushButton, assignment: QComboBox, bounded: bool) -> None:
         dialog = _WallImpedanceDialog(dict(button.property("boundary_parameters") or {}), self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        button.setProperty("boundary_parameters", dialog.parameters())
+        parameters = dict(button.property("boundary_parameters") or {})
+        parameters.pop("wall_impedance", None)
+        parameters.update(dialog.parameters())
+        button.setProperty("boundary_parameters", parameters)
         self._refresh_wall_impedance_button(button, assignment, bounded)
 
     def _invalidate_identified_interfaces(self, _index: int) -> None:
@@ -1151,7 +1185,7 @@ class SystemConfigDialog(QDialog):
             kind=ComponentKind.IDEAL_VELOCITY_SOURCE,
             boundary_ids=(),
             channel=self._channel_names[0],
-            parameters={"motion_profile": "uniform"},
+            parameters={},
             motion_axis_mode="automatic",
         )
         self._open_component_editor(draft, row=None)
@@ -1280,6 +1314,7 @@ class SystemConfigDialog(QDialog):
             symmetry_mode=self._symmetry_mode,
             mesh_cache=self._motion_axis_mesh_cache,
             projected_geometry_cache=self._projected_area_geometry_cache,
+            exterior_only=not any(region.kind == AcousticRegionKind.BOUNDED_AIR for region in _regions),
             parent=self,
         )
         if editor.exec() != QDialog.DialogCode.Accepted:
@@ -1399,7 +1434,13 @@ class SystemConfigDialog(QDialog):
                 else ExcitationPortKind.NORMAL_VELOCITY
             )
             default_port_name = (
-                f"{name} voltage" if port_kind == ExcitationPortKind.VOLTAGE else f"{name} unit normal velocity"
+                f"{name} voltage"
+                if port_kind == ExcitationPortKind.VOLTAGE
+                else (
+                    f"{name} unit axial velocity"
+                    if draft.parameters.get("motion_profile") == "rigid_translation"
+                    else f"{name} unit normal velocity"
+                )
             )
             ports.append(
                 ExcitationPort(
@@ -1546,7 +1587,9 @@ class SystemConfigDialog(QDialog):
                     loss_model=(
                         {}
                         if draft["kind"] == AcousticRegionKind.UNBOUNDED_AIR
-                        else {REGION_BULK_LOSS_FACTOR_KEY: draft["bulk_loss_factor"]}
+                        else {
+                            REGION_BULK_LOSS_FACTOR_KEY: draft["bulk_loss_factor"],
+                        }
                     ),
                 )
             )
@@ -1564,6 +1607,12 @@ class SystemConfigDialog(QDialog):
         )
         self._refresh_component_symmetry_parameters(boundaries, resources)
         components, ports, component_channels = self._collect_components(boundaries)
+        if any(region.kind == AcousticRegionKind.BOUNDED_AIR for region in regions) and any(
+            component.kind == ComponentKind.IDEAL_VELOCITY_SOURCE
+            and component.parameters.get("motion_profile") == "rigid_translation"
+            for component in components
+        ):
+            raise ValueError("Axial prescribed-velocity sources require an exterior-only BEM system.")
         if not any(region.kind == AcousticRegionKind.BOUNDED_AIR for region in regions):
             unsupported = [
                 component.name for component in components if component.kind != ComponentKind.IDEAL_VELOCITY_SOURCE

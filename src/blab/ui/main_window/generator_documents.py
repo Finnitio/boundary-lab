@@ -20,12 +20,12 @@ from PySide6.QtWidgets import (
 
 from blab.generators.application import stage_generation
 from blab.generators.ath import ATH_PROVIDER_ID, with_ath_source_text
-from blab.generators.base import GeneratedGeometry, GenerationCompleted, GeneratorDocument
+from blab.generators.base import GeneratedGeometry, GenerationCompleted, GeneratorDocument, generated_mesh_id
 from blab.generators.catalog import provider_catalog
 from blab.generators.configuration import configuration_snapshot, project_revision
 from blab.generators.registry import generator_info, restore_generator_document
+from blab.generators.resources import generated_mesh_name, generated_mesh_names, without_assembly
 from blab.project.model import (
-    generator_mesh_name,
     new_generator_document,
     replace_generator_document,
     unique_generator_name,
@@ -116,7 +116,7 @@ class GeneratorDocumentsMixin:
             try:
                 info = generator_info(document.provider_id)
                 if document.provider_schema_version != info.source_schema_version:
-                    raise ValueError("Incompatible provider source schema; source has been preserved.")
+                    raise ValueError("Incompatible Generator Plugin source schema; source has been preserved.")
                 if document.provider_id == ATH_PROVIDER_ID:
                     adapter = AthProviderEditor(
                         self.editor_tabs, host, highlight_syntax=self.syntax_highlighting_enabled
@@ -129,7 +129,7 @@ class GeneratorDocumentsMixin:
                 else:
                     factory = provider_catalog().factory(document.provider_id, "editor")
                     if factory is None:
-                        raise ValueError("This provider does not supply a custom editor.")
+                        raise ValueError("This Generator Plugin does not supply a custom editor.")
                     # Own even partially constructed child widgets if a factory raises.
                     container = QWidget(self.editor_tabs)
                     container.hide()
@@ -142,10 +142,10 @@ class GeneratorDocumentsMixin:
                     or adapter.widget is self.editor_tabs
                     or adapter.widget is container
                 ):
-                    raise TypeError("Provider must supply its own widget.")
+                    raise TypeError("Generator Plugin must supply its own widget.")
                 for method in ("apply_source", "set_operation_state", "dispose"):
                     if not callable(getattr(adapter, method, None)):
-                        raise TypeError(f"Provider editor is missing {method}().")
+                        raise TypeError(f"Generator Plugin editor is missing {method}().")
                 snapshot = host.snapshot()
                 adapter.apply_source(snapshot.source, snapshot.revision)
                 editor = adapter.widget
@@ -166,7 +166,10 @@ class GeneratorDocumentsMixin:
                 editor = QPlainTextEdit()
                 editor.setReadOnly(True)
                 editor.setPlainText(
-                    f"{document.provider_id}: {exc}\n\n" + json.dumps(document.source, indent=2, sort_keys=True)
+                    f"{document.provider_id}: {exc}\n\n"
+                    "Open Edit > Generator Plugins... to check availability.\n"
+                    "Saved design source has been preserved.\n\n"
+                    + json.dumps(document.source, indent=2, sort_keys=True)
                 )
             self._install_tab_close_button(self.editor_tabs.addTab(editor, document.name), document.name)
         add_tab = AthScriptEditor(highlight_syntax=False)
@@ -174,7 +177,7 @@ class GeneratorDocumentsMixin:
         add_tab.configDropped.connect(lambda path: self.import_config_path(Path(path)))
         add_index = self.editor_tabs.addTab(add_tab, ADD_DESIGN_TAB_LABEL)
         self.editor_tabs.tabBar().setTabButton(add_index, QTabBar.ButtonPosition.RightSide, None)
-        self.editor_tabs.tabBar().setTabToolTip(add_index, "Add waveguide design")
+        self.editor_tabs.tabBar().setTabToolTip(add_index, "Add design")
         active_index = self.active_generator_document_index()
         if active_index >= 0:
             self.editor_tabs.setCurrentIndex(active_index)
@@ -243,6 +246,8 @@ class GeneratorDocumentsMixin:
         if not hasattr(self, "generate_button"):
             return
         document = self.active_generator_document()
+        if hasattr(self, "export_ath_design_action"):
+            self.export_ath_design_action.setEnabled(bool(document and document.provider_id == ATH_PROVIDER_ID))
         try:
             info = generator_info(document.provider_id) if document else None
             available = bool(info and info.available and info.source_schema_version == document.provider_schema_version)
@@ -259,6 +264,8 @@ class GeneratorDocumentsMixin:
         provider_id = self.preferences.default_geometry_provider
         if provider_id == ATH_PROVIDER_ID:
             return new_generator_document(name, "")
+        if name == "waveguide":
+            name = "design"
         # Defaults are declarative: creating a design never instantiates a backend.
         manifest = provider_catalog().package(provider_id).manifest
         return replace(
@@ -273,11 +280,11 @@ class GeneratorDocumentsMixin:
 
     @Slot()
     def add_generator_document(self) -> None:
-        name = unique_generator_name("waveguide", self.generator_documents)
+        name = unique_generator_name("design", self.generator_documents)
         try:
             document = self.new_default_generator_document(name)
         except ValueError as exc:
-            self.show_error("Geometry provider unavailable", str(exc))
+            self.show_error("Generator Plugin unavailable", str(exc))
             self.editor_tabs.setCurrentIndex(self.active_generator_document_index())
             return
         self.generator_documents = (*self.generator_documents, document)
@@ -291,7 +298,7 @@ class GeneratorDocumentsMixin:
             return
         name, accepted = QInputDialog.getText(
             self,
-            "Rename Waveguide Design",
+            "Rename Design",
             "Design name:",
             text=document.name,
         )
@@ -300,14 +307,33 @@ class GeneratorDocumentsMixin:
         name = name.strip()
         if not name:
             return
-        self.generator_documents = replace_generator_document(
-            self.generator_documents,
-            document.id,
+        renamed = replace(
+            document,
             name=unique_generator_name(
                 name,
                 tuple(item for item in self.generator_documents if item.id != document.id),
             ),
         )
+        if document.artifact is not None and document.artifact.meshes and self.project.physical_system is not None:
+            names = {
+                generated_mesh_id(document.id, mesh.id): generated_mesh_name(renamed, mesh.id)
+                for mesh in document.artifact.meshes
+            }
+            other_names = {mesh.name for mesh in self.project.physical_system.meshes if mesh.id not in names}
+            other_names.update(mesh.name for mesh in self.project.imported_meshes)
+            if other_names.intersection(names.values()):
+                self.show_error(
+                    "Cannot rename generated assembly", "The generated mesh names conflict with existing meshes."
+                )
+                return
+            self.project.physical_system = replace(
+                self.project.physical_system,
+                meshes=tuple(
+                    replace(mesh, name=names[mesh.id]) if mesh.id in names else mesh
+                    for mesh in self.project.physical_system.meshes
+                ),
+            )
+        self.generator_documents = replace_generator_document(self.generator_documents, document.id, name=renamed.name)
         self.rebuild_generator_document_tabs()
         self.mesh_state_changed.emit("generator_document_renamed")
         self.solve_results_invalidated.emit("generator_document_renamed")
@@ -316,6 +342,17 @@ class GeneratorDocumentsMixin:
         if not (0 <= index < len(self.generator_documents)):
             return
         document = self.generator_documents[index]
+        try:
+            system = without_assembly(self.project.physical_system, document)
+        except ValueError as exc:
+            self.show_error("Cannot remove generated assembly", str(exc))
+            return
+        if system is not None and system is not self.project.physical_system:
+            components = {item.id for item in system.components}
+            self.project.component_channel_by_id = {
+                key: value for key, value in self.project.component_channel_by_id.items() if key in components
+            }
+        self.project.physical_system = system
         self.generator_documents = tuple(item for item in self.generator_documents if item.id != document.id)
         self.generated_geometry_by_document_id.pop(document.id, None)
         self.active_generator_document_id = (
@@ -329,7 +366,7 @@ class GeneratorDocumentsMixin:
 
     def _generator_document_for_mesh_name(self, mesh_name: str) -> GeneratorDocument | None:
         return next(
-            (document for document in self.generator_documents if generator_mesh_name(document) == mesh_name),
+            (document for document in self.generator_documents if mesh_name in generated_mesh_names(document)),
             None,
         )
 

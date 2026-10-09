@@ -797,7 +797,8 @@ def test_semi_inductance_dialog_requires_a_complete_enabled_model() -> None:
         dialog.model_parameters()
 
 
-def test_component_editor_applies_automatic_axis_to_a_two_sided_transducer(monkeypatch) -> None:
+@pytest.mark.parametrize("shared_region", (False, True))
+def test_component_editor_applies_automatic_axis_to_a_two_sided_transducer(monkeypatch, shared_region) -> None:
     resources = {
         "mesh:front": MeshResource(
             id="mesh:front",
@@ -823,7 +824,7 @@ def test_component_editor_applies_automatic_axis_to_a_two_sided_transducer(monke
         Boundary(
             id="boundary:rear",
             name="Rear",
-            region_id="region:rear",
+            region_id="region:front" if shared_region else "region:rear",
             group=PhysicalGroupRef(mesh_id="mesh:rear", dimension=2, name="Rear"),
             kind=BoundaryKind.MOVING,
         ),
@@ -934,14 +935,15 @@ def test_component_editor_applies_automatic_axis_to_a_two_sided_transducer(monke
 
 
 def test_front_only_folded_surface_keeps_full_lumped_chamber_area() -> None:
+    # Axial connector faces join the fold across tags without adding projected area.
     resource = MeshResource("mesh:folded", "Folded", "unused.msh", MeshPurpose.FEM_VOLUME)
     mesh = meshio.Mesh(
         points=np.asarray(
             ((0, 0, 0), (2, 0, 0), (0, 1, 0), (0, 0, 1), (0, 0.5, 1), (1, 0, 1)),
             dtype=float,
         ),
-        cells=[("triangle", np.asarray(((0, 1, 2), (3, 4, 5))))],
-        cell_data={"gmsh:physical": [np.asarray((1, 2))]},
+        cells=[("triangle", np.asarray(((0, 1, 2), (0, 3, 1), (1, 3, 5), (3, 4, 5))))],
+        cell_data={"gmsh:physical": [np.asarray((1, 1, 2, 2))]},
         field_data={"Dome": np.asarray((1, 2)), "Return": np.asarray((2, 2))},
     )
     boundaries = tuple(
@@ -1450,6 +1452,89 @@ def test_system_dialog_edits_region_loss_and_rigid_wall_impedance() -> None:
     assert interior.loss_model["bulk_loss_factor"] == pytest.approx(0.02)
     assert wall.parameters["wall_impedance"]["thickness_m"] == pytest.approx(0.03)
     assert wall.parameters["wall_impedance"]["flow_resistivity_pa_s_per_m2"] == pytest.approx(5000.0)
+
+
+def _thermoviscous_wall_row(dialog):
+    return next(
+        r
+        for r in range(dialog.boundaries_table.rowCount())
+        if dialog.boundaries_table.item(r, 1).text() == "Interior"
+        and dialog.boundaries_table.item(r, 2).text() == "Volume_boundary"
+    )
+
+
+def test_thermoviscous_dropdown_round_trips_and_defaults_off() -> None:
+    dialog = _configured_fixture_dialog()
+    assert dialog.regions_table.columnCount() == 5
+    row = _thermoviscous_wall_row(dialog)
+    combo = dialog.boundaries_table.cellWidget(row, 5)
+    assert isinstance(combo, QComboBox)
+    assert [combo.itemText(i) for i in range(combo.count())] == ["Off", "Thin boundary layer"]
+    assert combo.currentData() == "off"
+    assert combo.isEnabled()
+    combo.setCurrentIndex(1)
+    dialog._refresh_boundaries()
+    system = dialog.physical_system()
+    selected = [b for b in system.boundaries if b.parameters.get("thermoviscous_wall_losses") == "thin_boundary_layer"]
+    assert len(selected) == 1
+    assert selected[0].group.name == "Volume_boundary"
+    assert all("thermoviscous_wall_losses" not in r.loss_model for r in system.regions)
+    restored = SystemConfigDialog(inspect_system_meshes(_fixture_mesh_entries()), system, ("main",))
+    row = _thermoviscous_wall_row(restored)
+    combo = restored.boundaries_table.cellWidget(row, 5)
+    assert combo.currentData() == "thin_boundary_layer"
+    assert all(
+        not restored.boundaries_table.cellWidget(r, 5).isEnabled()
+        for r in range(restored.boundaries_table.rowCount())
+        if r != row
+    )
+    combo.setCurrentIndex(0)
+    assert all("thermoviscous_wall_losses" not in b.parameters for b in restored.physical_system().boundaries)
+
+
+def test_wall_impedance_editor_preserves_thermoviscous_selection(monkeypatch) -> None:
+    dialog = _configured_fixture_dialog()
+    row = _thermoviscous_wall_row(dialog)
+    loss = dialog.boundaries_table.cellWidget(row, 5)
+    loss.setCurrentIndex(1)
+
+    class Editor:
+        def __init__(self, *args):
+            pass
+
+        def exec(self):
+            return system_config_module.QDialog.DialogCode.Accepted
+
+        def parameters(self):
+            return {}
+
+    monkeypatch.setattr(system_config_module, "_WallImpedanceDialog", Editor)
+    button = dialog.boundaries_table.cellWidget(row, 4)
+    dialog._edit_wall_impedance(button, dialog.boundaries_table.cellWidget(row, 3), True)
+    assert loss.currentData() == "thin_boundary_layer"
+    assert button.property("boundary_parameters")["thermoviscous_wall_losses"] == "thin_boundary_layer"
+
+
+def test_thermoviscous_selection_clears_for_incompatible_assignment_or_lining() -> None:
+    dialog = _configured_fixture_dialog()
+    row = _thermoviscous_wall_row(dialog)
+    loss = dialog.boundaries_table.cellWidget(row, 5)
+    assignment = dialog.boundaries_table.cellWidget(row, 3)
+    button = dialog.boundaries_table.cellWidget(row, 4)
+    loss.setCurrentIndex(1)
+    assignment.setCurrentIndex(assignment.findData(BoundaryKind.MOVING))
+    assert not loss.isEnabled()
+    assert loss.currentData() == "off"
+    assignment.setCurrentIndex(assignment.findData(BoundaryKind.RIGID))
+    assert loss.isEnabled()
+    loss.setCurrentIndex(1)
+    parameters = dict(button.property("boundary_parameters"))
+    parameters["wall_impedance"] = {"model": "miki"}
+    button.setProperty("boundary_parameters", parameters)
+    dialog._refresh_wall_impedance_button(button, assignment, True)
+    assert not loss.isEnabled()
+    assert loss.currentData() == "off"
+    assert "thermoviscous_wall_losses" not in button.property("boundary_parameters")
 
 
 def test_excitation_rows_on_the_same_channel_are_combined_before_dsp() -> None:

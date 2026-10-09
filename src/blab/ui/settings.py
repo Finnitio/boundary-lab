@@ -7,8 +7,9 @@ from dataclasses import dataclass, field, replace
 
 from PySide6.QtCore import QSettings
 
+from blab.generators.catalog import bundled_provider_ids
 from blab.project.model import ProjectPreferencesState
-from blab.solvers.registry import normalize_backend_id
+from blab.solvers.registry import normalize_backend_id, packaged_backend_available
 
 SETTINGS_ORG = "Boundary Lab"
 SETTINGS_APP = "Ath4LiveBEM"
@@ -41,7 +42,9 @@ def application_settings() -> QSettings:
 class GuiPreferences:
     def __post_init__(self) -> None:
         backend = normalize_backend_id(self.solve_backend)
-        self.solve_backend = "beat_cpu" if backend in {"local", "server"} else backend
+        self.solve_backend = (
+            "beat_cpu" if backend in {"local", "server"} or not packaged_backend_available(backend) else backend
+        )
 
     theme: str = "system"
     default_geometry_provider: str = "ath"
@@ -169,6 +172,13 @@ def load_gui_preferences(settings: QSettings) -> GuiPreferences:
         enabled = [enabled] if enabled else []
     if not isinstance(enabled, (list, tuple)):
         enabled = []
+    enabled = [item for item in enabled if isinstance(item, str) and item]
+    # First-party packages ship with the application. Enable this one once,
+    # while preserving later opt-outs and every existing default selection.
+    if not settings_bool(settings, "providers/vented_enclosure_introduced", False):
+        enabled = list(dict.fromkeys([*enabled, *bundled_provider_ids()]))
+        settings.setValue("providers/enabled", enabled)
+        settings.setValue("providers/vented_enclosure_introduced", True)
     return GuiPreferences(
         default_geometry_provider=settings_str(settings, "providers/default", "ath"),
         enabled_geometry_providers=tuple(item for item in enabled if isinstance(item, str) and item),
@@ -265,6 +275,7 @@ def load_gui_preferences(settings: QSettings) -> GuiPreferences:
 def save_gui_preferences(settings: QSettings, preferences: GuiPreferences) -> None:
     settings.setValue("providers/default", preferences.default_geometry_provider)
     settings.setValue("providers/enabled", list(preferences.enabled_geometry_providers))
+    settings.setValue("providers/vented_enclosure_introduced", True)
     settings.setValue("preferences/theme", preferences.theme)
     settings.setValue("preferences/solve_backend", preferences.solve_backend)
     settings.setValue("preferences/cuda_worker_reuse", preferences.cuda_worker_reuse)

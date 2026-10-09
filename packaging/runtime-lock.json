@@ -1,0 +1,14 @@
+{
+  "python": {
+    "version": "3.13.13",
+    "url": "https://www.python.org/ftp/python/3.13.13/python-3.13.13-embed-amd64.zip",
+    "sha256": "8766a8775746235e23cf5aee5027ab1060bb981d93110577adcf3508aa0cbd55"
+  },
+  "julia": {
+    "version": "1.12.6",
+    "url": "https://julialang-s3.julialang.org/bin/winnt/x64/1.12/julia-1.12.6-win64.zip",
+    "sha256": "a63d991976e6893f508c512e3dc7bca1836c1a1f6ad1f3e4aedec159b6733e89"
+  },
+  "beat_requirement": "beat-engine @ git+https://github.com/JWSound/BEAT_Engine.git@96cb77e5eb5b8c15c6bbf50b73c4737028ab6cea",
+  "cuda_runtime": "13.3"
+}
