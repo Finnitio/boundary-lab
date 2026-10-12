@@ -1,0 +1,4 @@
+# Undo the shared .git/info/exclude entries meant for the main checkout
+!/CLAUDE.md
+!/docs/agents/
+__pycache__/

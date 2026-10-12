@@ -1,0 +1,1089 @@
+<title>Boundary Lab Model Tree</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap">
+<style>
+/* Layout: a desktop-app mock (tree | settings | graphics) inside a quiet proposal page; single dark look matching Boundary Lab's own theme */
+:root {
+  color-scheme: dark;
+  --page: #121411;
+  --win: #1c1e1a;
+  --panel: #232520;
+  --panel-2: #2b2e28;
+  --line: #3a3d35;
+  --fg: #e3e5dc;
+  --muted: #9b9f92;
+  --faint: #6c7066;
+  --sel: #2f6d94;
+  --sel-soft: #24445a;
+  --titlebar: #1b3566;
+  --accent: #f0b030;
+  --moving: #4a8fd6;
+  --ok: #73b26c;
+  --warn: #d9a441;
+  --plot-bg: #ffffff;
+  --plot-fg: #222222;
+  --plot-grid: #dddddd;
+  --f-ui: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-head: "IBM Plex Sans Condensed", "IBM Plex Sans", "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", Consolas, "Courier New", monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--page); color: var(--fg); font: 14px/1.45 var(--f-ui); }
+.wrap { padding-inline: 16px; padding-block: 18px 28px; max-width: 1680px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+header.intro { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: end; justify-content: space-between; }
+.intro h1 { font: 600 26px/1.15 var(--f-head); margin: 0; letter-spacing: .01em; text-wrap: balance; }
+.intro p { margin: 4px 0 0; color: var(--muted); max-width: 72ch; }
+.intro code { font-family: var(--f-mono); font-size: 12.5px; color: var(--fg); }
+.views { display: flex; gap: 4px; background: var(--panel); padding: 3px; border: 1px solid var(--line); border-radius: 6px; }
+.views button { font: 500 13px var(--f-ui); color: var(--muted); background: none; border: 0; padding: 6px 14px; border-radius: 4px; cursor: pointer; }
+.views button[aria-selected="true"] { background: var(--sel); color: #fff; }
+.tour { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--muted); font-size: 12.5px; }
+.tour .lbl { text-transform: uppercase; letter-spacing: .08em; font-size: 11px; }
+.tour button { font: 500 12.5px var(--f-ui); color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+.tour button:hover { border-color: var(--sel); }
+.tour button .n { color: var(--accent); font-family: var(--f-mono); margin-right: 6px; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, .row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ---------- app window ---------- */
+.app { border: 1px solid #000; background: var(--win); display: flex; flex-direction: column; height: min(820px, calc(100vh - 150px)); min-height: 620px; box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+.titlebar { background: var(--titlebar); color: #fff; font-size: 12.5px; padding: 5px 10px; display: flex; align-items: center; gap: 8px; }
+.titlebar .logo { width: 13px; height: 13px; border-radius: 50%; background: conic-gradient(#e94b2c, #f6c445, #e94b2c); }
+.titlebar .ctl { margin-left: auto; letter-spacing: 14px; opacity: .8; }
+.menubar { display: flex; gap: 14px; padding: 3px 10px; font-size: 12.5px; color: var(--fg); border-bottom: 1px solid var(--line); }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.tb { font: 500 12.5px var(--f-ui); color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; padding: 4px 10px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.tb:hover:not(:disabled) { border-color: #5a5e54; background: #33362f; }
+.tb:disabled { color: var(--faint); cursor: default; }
+.tb kbd { font: 11px var(--f-mono); color: var(--muted); }
+.tb.primary { background: #2c4a33; border-color: #3f6a48; }
+.sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+.tb-note { margin-left: auto; font-size: 12px; color: var(--muted); }
+.panes { flex: 1; min-height: 0; display: grid; grid-template-columns: 250px var(--settings-w, 400px) 5px minmax(0, 1fr); }
+.pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
+.pane + .pane { border-left: 1px solid var(--line); }
+.pane-h { font: 600 12px var(--f-ui); padding: 6px 10px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; background: var(--panel-2); min-height: 31px; }
+.pane-h .sub { font-weight: 400; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pane-h .tools { margin-left: auto; display: flex; gap: 4px; }
+.icon-btn { background: none; border: 1px solid transparent; color: var(--fg); border-radius: 3px; width: 24px; height: 22px; cursor: pointer; font: 600 15px/1 var(--f-ui); }
+.icon-btn:hover { border-color: var(--line); background: var(--panel); }
+.splitter { background: var(--line); cursor: col-resize; }
+.splitter:hover, .splitter.drag { background: var(--sel); }
+.statusbar { display: flex; flex-wrap: wrap; gap: 4px 20px; padding: 4px 10px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); background: var(--panel); font-variant-numeric: tabular-nums; }
+.statusbar .msg { color: var(--fg); }
+.statusbar .right { margin-left: auto; }
+
+/* tree */
+.tree { overflow: auto; flex: 1; padding: 4px 0 10px; user-select: none; }
+.row { display: flex; align-items: center; gap: 5px; height: 25px; padding-right: 8px; cursor: pointer; white-space: nowrap; font-size: 13px; }
+.row:hover { background: #2d302a; }
+.row.sel { background: var(--sel); color: #fff; }
+.row.dis { color: var(--faint); }
+.row .tw { width: 14px; flex: none; text-align: center; color: var(--muted); font-size: 10px; }
+.row.sel .tw { color: #dce8f0; }
+.row svg { flex: none; width: 15px; height: 15px; }
+.row .lab { overflow: hidden; text-overflow: ellipsis; }
+.badge { font: 500 10.5px var(--f-ui); padding: 0 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); margin-left: auto; flex: none; }
+.badge.warn { color: var(--warn); border-color: #6e5a2c; }
+.row.sel .badge { color: #fff; border-color: rgba(255,255,255,.4); }
+
+/* settings */
+.settings { overflow: auto; flex: 1; padding: 12px 14px 20px; display: flex; flex-direction: column; gap: 14px; }
+.settings h2 { font: 600 17px/1.2 var(--f-head); margin: 0; display: flex; align-items: center; gap: 8px; }
+.settings h2 svg { width: 18px; height: 18px; }
+.settings .lede { color: var(--muted); margin: -6px 0 0; font-size: 13px; }
+fieldset { border: 1px solid var(--line); border-radius: 4px; padding: 10px 10px 12px; margin: 0; display: grid; grid-template-columns: minmax(90px, max-content) minmax(0, 1fr); gap: 7px 10px; align-items: center; }
+fieldset.stack { display: flex; flex-direction: column; align-items: stretch; }
+legend { font: 600 12px var(--f-ui); color: var(--muted); padding: 0 4px; text-transform: uppercase; letter-spacing: .06em; }
+label.k { font-size: 13px; color: var(--muted); }
+.hint { grid-column: 1 / -1; font-size: 12px; color: var(--faint); }
+.hint.warn { color: var(--warn); }
+input[type=text], input[type=number], select, textarea { font: 13px var(--f-ui); color: var(--fg); background: #1a1c18; border: 1px solid var(--line); border-radius: 3px; padding: 4px 6px; width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
+input[readonly] { color: var(--muted); }
+textarea { font: 12.5px/1.5 var(--f-mono); resize: vertical; min-height: 340px; white-space: pre; tab-size: 4; }
+.xyz { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.btnrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 3px; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th { text-align: left; font-weight: 600; color: var(--muted); background: var(--panel-2); padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 4px 8px; border-bottom: 1px solid #30332d; vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+td input[type=number] { width: 84px; }
+tr.click { cursor: pointer; }
+tr.click:hover td { background: #2d302a; }
+.chip { display: inline-block; font-size: 11.5px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.chip.moving { color: #9cc4ee; border-color: #35597d; }
+.chip.hi { color: var(--accent); border-color: #75592a; }
+.mono { font-family: var(--f-mono); font-size: 12px; }
+.path-pill { font: 600 12px var(--f-mono); color: #a7d3a2; background: #213021; border: 1px solid #355536; padding: 2px 8px; border-radius: 3px; }
+
+/* graphics */
+.gfx { flex: 1; min-height: 0; position: relative; background: #24282a; }
+.gfx canvas.view3d { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+.gfx canvas.view3d:active { cursor: grabbing; }
+.gfx .legend3d { position: absolute; left: 10px; bottom: 8px; display: flex; flex-wrap: wrap; gap: 10px; font-size: 11.5px; color: #c9ccc2; pointer-events: none; }
+.legend3d span::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; background: var(--c); border-radius: 2px; }
+.gfx .readout { position: absolute; right: 10px; bottom: 8px; font-size: 11.5px; color: #c9ccc2; pointer-events: none; font-variant-numeric: tabular-nums; }
+.gfx .tip { position: absolute; pointer-events: none; background: rgba(15,17,14,.94); border: 1px solid var(--line); padding: 5px 8px; font-size: 12px; border-radius: 3px; white-space: nowrap; z-index: 2; }
+.gfx .drag-hint { position: absolute; right: 10px; top: 8px; font-size: 11.5px; color: #9ea296; pointer-events: none; }
+.plotgrid { position: absolute; inset: 0; overflow: auto; padding: 6px; display: grid; gap: 6px; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); grid-auto-rows: minmax(230px, 1fr); background: var(--win); }
+.plotcell { background: var(--plot-bg); border: 2px solid transparent; position: relative; min-height: 0; display: flex; flex-direction: column; cursor: pointer; }
+.plotcell.focus { border-color: var(--accent); }
+.plotcell .ph { font: 600 11.5px var(--f-ui); color: #ddd; background: #2b2e28; padding: 3px 8px; display: flex; justify-content: space-between; gap: 8px; }
+.plotcell .ph span:last-child { color: #9b9f92; font-weight: 400; }
+.plotcell canvas { flex: 1; min-height: 0; width: 100%; display: block; }
+.solvebar { position: absolute; left: 0; right: 0; top: 0; padding: 8px 12px; background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: 12.5px; display: flex; gap: 12px; align-items: center; z-index: 1; font-variant-numeric: tabular-nums; }
+.solvebar .bar { flex: 1; height: 6px; background: #1a1c18; border-radius: 3px; overflow: hidden; }
+.solvebar .bar i { display: block; height: 100%; background: var(--ok); width: 0; }
+
+/* context menu, toast */
+.ctx { position: fixed; z-index: 50; background: #262823; border: 1px solid #4a4d45; box-shadow: 0 8px 24px rgba(0,0,0,.5); padding: 4px 0; min-width: 230px; font-size: 13px; }
+.ctx button { display: flex; width: 100%; text-align: left; background: none; border: 0; color: var(--fg); padding: 5px 14px; font: 13px var(--f-ui); cursor: pointer; gap: 10px; }
+.ctx button:hover:not(:disabled) { background: var(--sel); color: #fff; }
+.ctx button:disabled { color: var(--faint); cursor: default; }
+.ctx button small { margin-left: auto; color: var(--faint); font-size: 11.5px; }
+.ctx hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.ctx .why { padding: 0 14px 5px 38px; font-size: 11.5px; color: var(--faint); max-width: 300px; }
+
+/* ---------- comparison view ---------- */
+.compare { display: flex; flex-direction: column; gap: 22px; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card h2 { font: 600 19px/1.2 var(--f-head); margin: 0; }
+.card h3 { font: 600 15px/1.25 var(--f-head); margin: 0; }
+.card p, .card li { color: #c8cbc0; max-width: 70ch; }
+.card p { margin: 0; }
+.card ol, .card ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 5px; }
+.eyebrow { font: 600 11px var(--f-ui); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.card.today .eyebrow { color: #d98a6a; }
+.card.new .eyebrow { color: var(--ok); }
+.metrics { display: flex; flex-wrap: wrap; gap: 8px; }
+.metric { border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; min-width: 120px; background: var(--win); }
+.metric b { display: block; font: 600 22px/1.1 var(--f-head); font-variant-numeric: tabular-nums; }
+.metric span { font-size: 12px; color: var(--muted); }
+.today .metric b { color: #e39a7b; }
+.new .metric b { color: #8fd18a; }
+.shots { display: grid; grid-template-columns: 1.4fr 1fr; gap: 8px; align-items: start; }
+.shots figure { margin: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.shots img { width: 100%; border: 1px solid #000; display: block; }
+.shots figcaption { font-size: 11.5px; color: var(--muted); }
+.stack-shots { display: flex; flex-direction: column; gap: 8px; }
+.mini { display: grid; grid-template-columns: 0.8fr 1fr 1.3fr; height: 150px; border: 1px solid #000; background: var(--win); }
+.mini > div { border-right: 1px solid var(--line); padding: 6px; display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; color: var(--muted); }
+.mini .m-sel { background: var(--sel); color: #fff; padding: 0 4px; }
+.mini .m-hi { background: radial-gradient(circle at 50% 45%, var(--accent) 0 9%, transparent 10%), radial-gradient(circle at 50% 45%, #7f878c 0 30%, transparent 31%), #24282a; border-right: 0; }
+.mini .bar { height: 5px; border-radius: 2px; background: #3a3d35; }
+.btn-cta { align-self: flex-start; font: 600 13px var(--f-ui); color: #fff; background: var(--sel); border: 0; border-radius: 4px; padding: 7px 14px; cursor: pointer; }
+.grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.steps { counter-reset: s; list-style: none; padding: 0 !important; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 26px 1fr; gap: 6px; }
+.steps li::before { content: counter(s); font: 600 12px/20px var(--f-mono); color: var(--accent); text-align: center; border: 1px solid #75592a; border-radius: 50%; width: 20px; height: 20px; }
+
+@media (max-width: 900px) {
+  .app { height: auto; min-height: 0; }
+  .panes { grid-template-columns: minmax(0, 1fr); }
+  .splitter { display: none; }
+  .pane + .pane { border-left: 0; border-top: 1px solid var(--line); }
+  .tree { max-height: 300px; }
+  .settings { max-height: 520px; }
+  .gfx { height: 440px; flex: none; }
+  .plotgrid { --cols: 1 !important; }
+  .shots { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-geo" viewBox="0 0 16 16"><path d="M8 1.5 14 5v6l-6 3.5L2 11V5z" fill="none" stroke="#d9b45a" stroke-width="1.3"/><path d="M2 5l6 3.5L14 5M8 8.5V14.5" fill="none" stroke="#d9b45a" stroke-width="1.1"/></symbol>
+  <symbol id="i-ath" viewBox="0 0 16 16"><path d="M2 3h12v10H2z" fill="none" stroke="#c9ccc2" stroke-width="1.2"/><path d="M4.5 6h5M4.5 8.5h7M4.5 11h4" stroke="#d9b45a" stroke-width="1.2"/></symbol>
+  <symbol id="i-mesh" viewBox="0 0 16 16"><path d="M2 13 8 2l6 11zM5 7.5h6M8 13 5 7.5M8 13l3-5.5" fill="none" stroke="#7fb3e0" stroke-width="1.1"/></symbol>
+  <symbol id="i-sys" viewBox="0 0 16 16"><circle cx="4" cy="4" r="2" fill="#8fc78a"/><circle cx="12" cy="4" r="2" fill="#8fc78a"/><circle cx="8" cy="12" r="2" fill="#8fc78a"/><path d="M4 4h8M4 4l4 8M12 4l-4 8" stroke="#8fc78a" stroke-width="1"/></symbol>
+  <symbol id="i-region" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9" rx="2" fill="#8fc78a" fill-opacity=".25" stroke="#8fc78a"/></symbol>
+  <symbol id="i-bnd" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9" rx="1" fill="none" stroke="#7fb3e0" stroke-width="1.6" stroke-dasharray="3 1.5"/></symbol>
+  <symbol id="i-ifc" viewBox="0 0 16 16"><path d="M8 2v12" stroke="#65c27c" stroke-width="2"/><rect x="2" y="4" width="4" height="8" fill="none" stroke="#9b9f92"/><rect x="10" y="4" width="4" height="8" fill="none" stroke="#9b9f92"/></symbol>
+  <symbol id="i-comp" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="#f0b030" stroke-width="1.3"/><circle cx="8" cy="8" r="2.2" fill="#f0b030"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.5 4h5l1.5 1.5h6.5V13h-13z" fill="#9b9f92" fill-opacity=".35" stroke="#9b9f92"/></symbol>
+  <symbol id="i-chan" viewBox="0 0 16 16"><path d="M1.5 8c1.5-5 3-5 4.5 0s3 5 4.5 0 3-5 4 0" fill="none" stroke="#e08b6a" stroke-width="1.4"/></symbol>
+  <symbol id="i-solve" viewBox="0 0 16 16"><path d="M4 2.5v11L13.5 8z" fill="#73b26c"/></symbol>
+  <symbol id="i-res" viewBox="0 0 16 16"><path d="M2 14V2M2 14h12" stroke="#c9ccc2" stroke-width="1.2"/><path d="M3.5 11 6.5 7l3 2 4-6" fill="none" stroke="#7fb3e0" stroke-width="1.4"/></symbol>
+  <symbol id="i-pg" viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" fill="#7fb3e0"/><rect x="9" y="2" width="5" height="5" fill="#e08b6a"/><rect x="2" y="9" width="5" height="5" fill="#e08b6a"/><rect x="9" y="9" width="5" height="5" fill="#7fb3e0"/></symbol>
+  <symbol id="i-plot" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" fill="none" stroke="#9b9f92"/><path d="M3 11c2-6 4 0 6-3s3-4 4.5-4" fill="none" stroke="#7fb3e0" stroke-width="1.3"/></symbol>
+  <symbol id="i-iso" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" fill="#1b2a8a"/><rect x="1.5" y="6" width="13" height="4" fill="#d22"/><rect x="1.5" y="7.2" width="7" height="1.6" fill="#700"/></symbol>
+  <symbol id="i-obs" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="#e05555" stroke-width="1.3"/><circle cx="8" cy="8" r="3.4" fill="none" stroke="#5577e0" stroke-width="1.3"/><circle cx="8" cy="8" r="1" fill="#e05555"/></symbol>
+</svg>
+
+<div class="wrap">
+  <header class="intro">
+    <div>
+      <h1>Boundary Lab Model Tree</h1>
+      <p>Proposal: replace the <b>Meshes</b>, <b>System</b> and <b>Channels</b> dialogs with one model tree, a settings panel and a graphics area that follows the selection. Clickable prototype with example data from <code>examples/MultiAth+Mesh_3WayIntegrated</code>.</p>
+    </div>
+    <div class="views" role="tablist" aria-label="Page view">
+      <button role="tab" id="tab-proto" aria-selected="true" data-view="proto">Prototype</button>
+      <button role="tab" id="tab-compare" aria-selected="false" data-view="compare">Today vs. proposal</button>
+    </div>
+  </header>
+
+  <section id="view-proto" style="display:flex;flex-direction:column;gap:10px">
+    <div class="tour">
+      <span class="lbl">Jump to</span>
+      <button data-go="comp:hf"><span class="n">1</span>Edit a component</button>
+      <button data-go="regions"><span class="n">2</span>System › Regions</button>
+      <button data-go="ath:mid"><span class="n">3</span>Ath design</button>
+      <button data-go="pg:overview"><span class="n">4</span>Results</button>
+      <span>· Right-click any tree node for its actions. Edits apply live; Ctrl+Z undoes.</span>
+    </div>
+
+    <div class="app" id="app">
+      <div class="titlebar"><span class="logo"></span>Boundary Lab Beta 0.4.0 — 3wayintegrated.blab.json<span class="ctl">–□×</span></div>
+      <div class="menubar"><span>File</span><span>View</span><span>Edit</span><span>About</span></div>
+      <div class="toolbar">
+        <button class="tb" id="b-gen" title="Generate meshes from all enabled designs">Generate <kbd>F7</kbd></button>
+        <button class="tb primary" id="b-solve" title="Solve the system">Solve <kbd>F5</kbd></button>
+        <button class="tb" id="b-stop" disabled>Stop <kbd>Shift+F5</kbd></button>
+        <span class="sep"></span>
+        <button class="tb" id="b-undo" disabled title="Undo (Ctrl+Z)">↶ Undo</button>
+        <button class="tb" id="b-redo" disabled title="Redo (Ctrl+Y)">↷ Redo</button>
+        <span class="sep"></span>
+        <button class="tb" id="b-add" title="Add to the selected node">＋ Add…</button>
+        <span class="tb-note" id="tb-note">Undo/Redo is new in this proposal</span>
+      </div>
+      <div class="panes" id="panes">
+        <div class="pane">
+          <div class="pane-h">Model Tree<span class="tools"><button class="icon-btn" id="tree-add" title="Add to the selected node" aria-label="Add to the selected node">＋</button></span></div>
+          <div class="tree" id="tree" role="tree" aria-label="Model tree"></div>
+        </div>
+        <div class="pane">
+          <div class="pane-h">Settings<span class="sub" id="settings-sub"></span></div>
+          <div class="settings" id="settings"></div>
+        </div>
+        <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" aria-label="Resize settings"></div>
+        <div class="pane">
+          <div class="pane-h" id="gfx-h">Graphics<span class="sub" id="gfx-sub"></span><span class="tools" id="gfx-tools"></span></div>
+          <div class="gfx" id="gfx"></div>
+        </div>
+      </div>
+      <div class="statusbar"><span class="msg" id="status">Opened project examples/MultiAth+Mesh_3WayIntegrated/3wayintegrated.blab.json</span><span class="right" id="status-r"></span></div>
+    </div>
+  </section>
+
+  <section id="view-compare" class="compare" hidden>
+    <div class="cols">
+      <article class="card today">
+        <span class="eyebrow">Today</span>
+        <h2>Change the relative velocity of one moving surface</h2>
+        <div class="metrics">
+          <div class="metric"><b>7</b><span>clicks and confirmations</span></div>
+          <div class="metric"><b>2</b><span>stacked modal windows</span></div>
+          <div class="metric"><b>0</b><span>3D feedback while editing</span></div>
+        </div>
+        <ol class="steps">
+          <li>Click <b>System</b> in the command strip. A modal window covers the preview.</li>
+          <li>Switch to the <b>Components</b> tab.</li>
+          <li>Select the component row.</li>
+          <li>Click <b>Edit</b>. A second modal window opens.</li>
+          <li>Change the value. The mesh preview is blocked, so you cannot see which surface it is.</li>
+          <li>Click <b>OK</b> in the component window.</li>
+          <li>Click <b>OK</b> in the System window to get back to the main window.</li>
+        </ol>
+        <div class="shots">
+          <figure><img src="img/componentswindow.png" alt="System window, Components tab"><figcaption>System window, Components tab</figcaption></figure>
+          <figure><img src="img/componenteditorwindow.png" alt="Component editor window on top of it"><figcaption>Component editor on top of it</figcaption></figure>
+        </div>
+      </article>
+      <article class="card new">
+        <span class="eyebrow">Proposal</span>
+        <h2>Same change in the model tree</h2>
+        <div class="metrics">
+          <div class="metric"><b>1</b><span>click on the component</span></div>
+          <div class="metric"><b>0</b><span>modal windows</span></div>
+          <div class="metric"><b>Live</b><span>surfaces highlighted in 3D</span></div>
+        </div>
+        <ol class="steps">
+          <li>Click the component under <b>System › Components</b>. Its moving surfaces light up in the graphics area.</li>
+          <li>Change the value. It applies immediately; <b>Ctrl+Z</b> reverts it.</li>
+        </ol>
+        <div class="mini" aria-hidden="true">
+          <div><b style="color:var(--fg)">Model Tree</b><span>▾ System</span><span>&nbsp;&nbsp;▸ Regions</span><span>&nbsp;&nbsp;▾ Components</span><span class="m-sel">&nbsp;&nbsp;&nbsp;&nbsp;HF Driver</span><span>&nbsp;&nbsp;&nbsp;&nbsp;Mid Driver</span><span>▸ Channels</span><span>▸ Results</span></div>
+          <div><b style="color:var(--fg)">Settings</b><span>Name</span><div class="bar"></div><span>Channel</span><div class="bar"></div><span>Moving surfaces</span><div class="bar"></div><div class="bar"></div></div>
+          <div class="m-hi"><b style="color:var(--fg)">Graphics</b></div>
+        </div>
+        <button class="btn-cta" data-go="comp:hf">Try it in the prototype</button>
+      </article>
+    </div>
+
+    <div class="grid3">
+      <article class="card">
+        <h3>Why it scales</h3>
+        <ul>
+          <li>A new feature becomes a new node type, not another button in the command strip and another window.</li>
+          <li>The tree reads top to bottom in workflow order: Geometry, Meshes, System, Channels, Solve, Results. It doubles as a checklist.</li>
+          <li>State is visible where it matters: Interfaces is greyed out until the system has both region types, and Solve and Results show <i>out of date</i> after a model edit.</li>
+          <li>The tree mirrors the <code>.blab.json</code> project. The file format does not change.</li>
+        </ul>
+      </article>
+      <article class="card">
+        <h3>What stays the same</h3>
+        <ul>
+          <li>Generate (F7), Solve (F5) and Stop (Shift+F5), now in a toolbar and on the matching nodes.</li>
+          <li>Solver backend and other app settings stay in <b>Edit › Preferences</b>; the Solve node only displays them.</li>
+          <li>Plot interactions: crosshair drag, right-click to compare with the previous solve, PNG export.</li>
+          <li>Several plots side by side. A plot group holds any number of plots, so today's dock layout becomes the default “Overview” group.</li>
+        </ul>
+      </article>
+      <article class="card">
+        <h3>A possible migration path</h3>
+        <ol>
+          <li>Tree plus stacked settings pages that host the existing dialog contents (the Regions, Boundaries, Interfaces, Components and Channels tables) without OK/Cancel.</li>
+          <li>Graphics area that follows the selection, reusing the mesh preview's surface picking for highlights.</li>
+          <li>Plot groups in place of fixed docks, and an undo stack. Undo is new work and the precondition for live editing.</li>
+        </ol>
+      </article>
+    </div>
+  </section>
+</div>
+
+<div class="ctx" id="ctx" hidden role="menu"></div>
+
+<script>
+(() => {
+/* ================= model ================= */
+const ATH_MID = `Throat.Profile = 1 ; 1 = OS-SE waveguide
+Throat.Diameter = 51 ; [mm]
+Throat.Angle = 0 ;
+Length = 200 ;
+Term.s = .8 ;
+Term.q = 0.996 ;
+Term.n = 4 ;
+OS.k = 1 ;
+Slot.Length = 0
+
+GCurve.Type = 2 ; 2 = superformula
+GCurve.Width = 85 ; [mm]
+GCurve.Dist = 0.5 ; mm distance from throat
+GCurve.SF = 1,1.2,4,3.5,20,2.5 ;{a, b, m, n1, n2, n3}
+GCurve.Rot = 0
+GCurve.AspectRatio = 1
+
+Morph.TargetWidth = 355 ; [mm]
+Morph.TargetHeight = 335 ; [mm]
+Morph.TargetShape = 1 ; morph to a rounded rectangle
+Morph.FixedPart = 0 ;
+Morph.Rate = 3 ;
+Morph.CornerRadius = 10 ; [mm]
+Morph.AllowShrinkage = 1
+
+Mesh.AngularSegments = 64 ;
+Mesh.LengthSegments = 12 ;
+Mesh.CornerSegments = 4 ;
+Mesh.ThroatResolution = 8 ; [mm]
+Mesh.MouthResolution = 24 ;
+Mesh.InterfaceResolution = 10 ; [mm]
+Mesh.InterfaceOffset = 5.0 ; [mm]
+Mesh.Quadrants = 14`;
+const ATH_HF = ATH_MID.replace('Throat.Diameter = 51', 'Throat.Diameter = 25.4').replace('Length = 200', 'Length = 90')
+  .replace('Morph.TargetWidth = 355', 'Morph.TargetWidth = 180').replace('Morph.TargetHeight = 335', 'Morph.TargetHeight = 140')
+  .replace('Mesh.ThroatResolution = 8', 'Mesh.ThroatResolution = 3').replace('Mesh.MouthResolution = 24', 'Mesh.MouthResolution = 10');
+
+const state = {
+  designs: [
+    { id: 'mid', name: 'MidWG', enabled: true, scale: 0.001, tx: 0, ty: 40, tz: 0, text: ATH_MID },
+    { id: 'hf', name: 'HFWaveguide', enabled: true, scale: 0.001, tx: 0, ty: 330, tz: 0, text: ATH_HF },
+  ],
+  meshes: [ { id: 'enc', name: '3WayIntegratedEnclosure', source: '3WayIntegratedEnclosure.msh', enabled: true, scale: 0.001, tx: 0, ty: 0, tz: 0 } ],
+  symmetry: 'Off',
+  stitch: true,
+  regions: [ { id: 'ext', name: 'Exterior Air', type: 'Unbounded Exterior', mesh: 'Stitched exterior (3 meshes)' } ],
+  components: [
+    { id: 'hf', name: 'HF Driver', type: 'Prescribed Velocity', channel: 'High', axis: 'Inferred', surfaces: [
+      { sid: 'hf:SD1D1001', use: true, db: -12 }, { sid: 'hf:SD1D1002', use: true, db: -2.5 }, { sid: 'hf:SD1D1003', use: true, db: 0 } ] },
+    { id: 'mid', name: 'Mid Driver', type: 'Prescribed Velocity', channel: 'Mid', axis: 'Inferred', surfaces: [ { sid: 'mid:SD1D1001', use: true, db: 0 } ] },
+    { id: 'lf', name: 'LF Woofers', type: 'Prescribed Velocity', channel: 'Low', axis: 'Inferred', surfaces: [
+      { sid: 'enc:10', use: true, db: 0 }, { sid: 'enc:10b', use: true, db: 0 }, { sid: 'enc:10c', use: true, db: 0 }, { sid: 'enc:10d', use: true, db: 0 } ] },
+  ],
+  channels: [
+    { id: 'High', name: 'High', color: '#1f77b4', trim: 0, polarity: 1, delay: 0, hpf: { on: true, f: 3000 }, lpf: { on: false, f: 20000 } },
+    { id: 'Mid', name: 'Mid', color: '#ff7f0e', trim: 0, polarity: 1, delay: 0, hpf: { on: true, f: 400 }, lpf: { on: true, f: 3000 } },
+    { id: 'Low', name: 'Low', color: '#2ca02c', trim: 0, polarity: 1, delay: 0, hpf: { on: false, f: 20 }, lpf: { on: true, f: 400 } },
+  ],
+  solve: { fmin: 20, fmax: 20000, n: 200 },
+  plotGroups: [
+    { id: 'overview', name: 'Overview', plots: [
+      { id: 'p1', type: 'isoH', title: 'Horizontal Isobar' },
+      { id: 'p2', type: 'onaxis', title: 'On-Axis Frequency Response', ymin: 50, ymax: 100, show: {} },
+      { id: 'p3', type: 'obs', title: 'Observation Plane 1' },
+      { id: 'p4', type: 'gd', title: 'Group Delay', ymin: 0, ymax: 8, show: {} } ] },
+    { id: 'dir', name: 'Directivity', plots: [
+      { id: 'p5', type: 'isoH', title: 'Horizontal Isobar' },
+      { id: 'p6', type: 'isoV', title: 'Vertical Isobar' },
+      { id: 'p7', type: 'spin', title: 'Spinorama', ymin: 50, ymax: 100 } ] },
+  ],
+  solved: { fmin: 20, fmax: 20000, n: 200 },
+  stale: false,
+};
+let uid = 10;
+const PLOT_TYPES = { isoH: 'Horizontal Isobar', isoV: 'Vertical Isobar', onaxis: 'On-Axis Frequency Response', gd: 'Group Delay', spin: 'Spinorama', obs: 'Observation Plane' };
+const PLOT_ICON = { isoH: 'i-iso', isoV: 'i-iso', onaxis: 'i-plot', gd: 'i-plot', spin: 'i-plot', obs: 'i-obs' };
+
+/* static surface registry (what the meshes contain) */
+const SURF = [
+  { sid: 'hf:SD1G0', mesh: 'hf', name: 'SD1G0', tag: 1, el: 2140 },
+  { sid: 'hf:SD1D1001', mesh: 'hf', name: 'SD1D1001', tag: 2, el: 96 },
+  { sid: 'hf:SD1D1002', mesh: 'hf', name: 'SD1D1002', tag: 3, el: 64 },
+  { sid: 'hf:SD1D1003', mesh: 'hf', name: 'SD1D1003', tag: 4, el: 38 },
+  { sid: 'mid:SD1G0', mesh: 'mid', name: 'SD1G0', tag: 1, el: 6412 },
+  { sid: 'mid:SD1D1001', mesh: 'mid', name: 'SD1D1001', tag: 2, el: 212 },
+  { sid: 'enc:front', mesh: 'enc', name: 'front', tag: 1, el: 9870 },
+  { sid: 'enc:rear', mesh: 'enc', name: 'rear', tag: 2, el: 6104 },
+  { sid: 'enc:10', mesh: 'enc', name: '10', tag: 10, el: 298 },
+  { sid: 'enc:10b', mesh: 'enc', name: '10b', tag: 11, el: 298 },
+  { sid: 'enc:10c', mesh: 'enc', name: '10c', tag: 12, el: 298 },
+  { sid: 'enc:10d', mesh: 'enc', name: '10d', tag: 13, el: 298 },
+];
+const surf = sid => SURF.find(s => s.sid === sid);
+function meshName(mid) { const d = state.designs.find(x => x.id === mid); if (d) return d.name; const m = state.meshes.find(x => x.id === mid); return m ? m.name : mid; }
+function meshEnabled(mid) { const d = state.designs.find(x => x.id === mid); if (d) return d.enabled; const m = state.meshes.find(x => x.id === mid); return m ? m.enabled : false; }
+function surfLabel(sid) { const s = surf(sid); return s ? meshName(s.mesh) + ':' + s.name : sid; }
+function ownerOf(sid) { return state.components.find(c => c.surfaces.some(s => s.sid === sid && s.use)); }
+const chanById = id => state.channels.find(c => c.id === id);
+
+/* ================= path helpers + undo ================= */
+const clone = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+function getPath(p) { return p.split('.').reduce((o, k) => o == null ? undefined : o[k], state); }
+function setPath(p, v) { const ks = p.split('.'); const last = ks.pop(); const o = ks.reduce((o, k) => (o[k] ??= {}), state); o[last] = v; }
+const undoStack = [], redoStack = [];
+function isStaleningPath(p) { return /^(designs|meshes|regions|components|symmetry|stitch)/.test(p); }
+function commit(entry) {
+  undoStack.push(entry); redoStack.length = 0;
+  if (isStaleningPath(entry.path)) state.stale = true;
+  status(entry.label + (isStaleningPath(entry.path) ? ' · results out of date' : /^channels/.test(entry.path) ? ' · results resynthesized, no re-solve needed' : '') + '  (Ctrl+Z to undo)');
+  updateUndoButtons();
+}
+function undo() { const e = undoStack.pop(); if (!e) return; setPath(e.path, clone(e.old)); redoStack.push(e); status('Undid: ' + e.label); updateUndoButtons(); renderAll(); }
+function redo() { const e = redoStack.pop(); if (!e) return; setPath(e.path, clone(e.new)); undoStack.push(e); if (isStaleningPath(e.path)) state.stale = true; status('Redid: ' + e.label); updateUndoButtons(); renderAll(); }
+function structural(path, label, fn) { const old = clone(getPath(path)); const nw = clone(old); fn(nw); setPath(path, nw); commit({ path, old, new: clone(nw), label }); renderAll(); }
+function updateUndoButtons() {
+  $('#b-undo').disabled = !undoStack.length; $('#b-redo').disabled = !redoStack.length;
+  $('#b-undo').title = undoStack.length ? 'Undo: ' + undoStack.at(-1).label + ' (Ctrl+Z)' : 'Nothing to undo';
+}
+
+/* ================= tree ================= */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let selected = 'comp:hf';
+const expanded = new Set(['geometry', 'meshes', 'system', 'components', 'channels', 'results', 'pg:overview']);
+
+function buildTree() {
+  const staleBadge = state.stale ? { badge: 'out of date', warn: true } : {};
+  const hasBounded = state.regions.some(r => r.type === 'Bounded Interior');
+  const hasUnbounded = state.regions.some(r => r.type === 'Unbounded Exterior');
+  return [
+    { id: 'geometry', label: 'Geometry', icon: 'i-geo', children: state.designs.map(d => ({ id: 'ath:' + d.id, label: d.name, icon: 'i-ath', dim: !d.enabled, badge: 'Ath' })) },
+    { id: 'meshes', label: 'Meshes', icon: 'i-mesh', badge: state.symmetry === 'Off' ? null : 'sym ' + state.symmetry, children: [
+      ...state.designs.map(d => ({ id: 'mesh:' + d.id, label: d.name, icon: 'i-mesh', dim: !d.enabled, badge: 'generated' })),
+      ...state.meshes.map(m => ({ id: 'mesh:' + m.id, label: m.name, icon: 'i-mesh', dim: !m.enabled, badge: '.msh' })) ] },
+    { id: 'system', label: 'System', icon: 'i-sys', children: [
+      { id: 'regions', label: 'Regions', icon: 'i-folder', children: state.regions.map(r => ({ id: 'region:' + r.id, label: r.name, icon: 'i-region' })) },
+      { id: 'boundaries', label: 'Boundaries', icon: 'i-bnd' },
+      { id: 'interfaces', label: 'Interfaces', icon: 'i-ifc', disabled: !(hasBounded && hasUnbounded) },
+      { id: 'components', label: 'Components', icon: 'i-folder', badge: String(state.components.length), children: state.components.map(c => ({ id: 'comp:' + c.id, label: c.name, icon: 'i-comp' })) } ] },
+    { id: 'channels', label: 'Channels', icon: 'i-chan', children: state.channels.map(c => ({ id: 'chan:' + c.id, label: c.name, icon: 'i-chan' })) },
+    { id: 'solve', label: 'Solve', icon: 'i-solve', ...staleBadge },
+    { id: 'results', label: 'Results', icon: 'i-res', ...staleBadge, children: state.plotGroups.map(g => ({ id: 'pg:' + g.id, label: g.name, icon: 'i-pg', badge: String(g.plots.length),
+      children: g.plots.map(p => ({ id: 'plot:' + g.id + ':' + p.id, label: p.title, icon: PLOT_ICON[p.type] })) })) },
+  ];
+}
+let flat = [], parentOf = {};
+function flatten(nodes, parent) { for (const n of nodes) { flat.push(n); parentOf[n.id] = parent; if (n.children) flatten(n.children, n.id); } }
+function renderTree() {
+  const nodes = buildTree(); flat = []; parentOf = {}; flatten(nodes, null);
+  if (!flat.some(n => n.id === selected)) { let p = selected; while (p && !flat.some(n => n.id === p)) p = fallbackParent(p); selected = p || 'geometry'; }
+  const out = [];
+  (function walk(list, depth) {
+    for (const n of list) {
+      const hasKids = n.children && n.children.length;
+      const open = expanded.has(n.id);
+      out.push(`<div class="row${n.id === selected ? ' sel' : ''}${n.disabled || n.dim ? ' dis' : ''}" role="treeitem" tabindex="${n.id === selected ? 0 : -1}" aria-selected="${n.id === selected}" ${hasKids ? `aria-expanded="${open}"` : ''} data-id="${esc(n.id)}" style="padding-left:${6 + depth * 16}px" title="${n.disabled ? 'Enabled when the system has both bounded and unbounded regions' : esc(n.label)}">
+        <span class="tw" data-tw="1">${hasKids ? (open ? '▾' : '▸') : ''}</span><svg><use href="#${n.icon}"/></svg><span class="lab">${esc(n.label)}</span>${n.badge ? `<span class="badge${n.warn ? ' warn' : ''}">${esc(n.badge)}</span>` : ''}</div>`);
+      if (hasKids && open) walk(n.children, depth + 1);
+    }
+  })(nodes, 0);
+  $('#tree').innerHTML = out.join('');
+}
+function fallbackParent(id) {
+  const m = { 'ath': 'geometry', 'mesh': 'meshes', 'region': 'regions', 'comp': 'components', 'chan': 'channels', 'pg': 'results' };
+  if (id.startsWith('plot:')) return 'pg:' + id.split(':')[1];
+  const k = id.split(':')[0]; return m[k] || null;
+}
+function select(id) {
+  const n = flat.find(x => x.id === id); if (n && n.disabled) { status('Interfaces is available when the system has both bounded and unbounded regions.'); return; }
+  selected = id; let p = parentOf[id]; while (p) { expanded.add(p); p = parentOf[p]; }
+  renderAll();
+  const row = document.querySelector(`.row[data-id="${CSS.escape(id)}"]`); row && row.scrollIntoView({ block: 'nearest' });
+}
+
+/* ================= settings ================= */
+function v(path) { return getPath(path); }
+function inp(path, t = 'str', label = '', attrs = '') {
+  const val = v(path); const id = 'f-' + path.replace(/\./g, '-');
+  if (t === 'bool') return `<input type="checkbox" id="${id}" data-path="${path}" data-t="bool" data-label="${esc(label)}" ${val ? 'checked' : ''} ${attrs}>`;
+  return `<input type="${t === 'num' ? 'number' : 'text'}" id="${id}" data-path="${path}" data-t="${t}" data-label="${esc(label)}" value="${esc(val ?? '')}" ${attrs}>`;
+}
+function sel(path, opts, t = 'str', label = '', attrs = '') {
+  const val = v(path); const id = 'f-' + path.replace(/\./g, '-');
+  return `<select id="${id}" data-path="${path}" data-t="${t}" data-label="${esc(label)}" ${attrs}>${opts.map(o => { const [ov, ol, dis] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(ov)}" ${String(ov) === String(val) ? 'selected' : ''} ${dis ? 'disabled' : ''}>${esc(ol)}</option>`; }).join('')}</select>`;
+}
+const fld = (k, html, id) => `<label class="k" ${id ? `for="${id}"` : ''}>${k}</label><div>${html}</div>`;
+const fid = p => 'f-' + p.replace(/\./g, '-');
+const head = (icon, title, lede) => `<h2><svg><use href="#${icon}"/></svg>${esc(title)}</h2>${lede ? `<p class="lede">${lede}</p>` : ''}`;
+const xyz = (base, keys, label) => `<div class="xyz">${keys.map(k => inp(base + '.' + k, 'num', label + ' ' + k.toUpperCase(), 'step="1"')).join('')}</div>`;
+
+function solvePath() {
+  const b = state.regions.filter(r => r.type === 'Bounded Interior').length, u = state.regions.filter(r => r.type === 'Unbounded Exterior').length;
+  if (u && !b) return 'Exterior BEM'; if (b && !u) return 'Interior FEM'; if (b && u) return 'Coupled FEM-BEM'; return 'No regions';
+}
+
+function settingsHTML(id) {
+  const [kind, a, b] = id.split(':');
+  if (id === 'geometry') return head('i-geo', 'Geometry', 'Design documents from geometry providers. Each enabled design generates one mesh.') +
+    `<fieldset><legend>Designs</legend>${fld('Provider', '<input type="text" readonly value="Ath (bundled)">')}<div class="hint">${state.designs.length} designs. Right-click Geometry to add one.</div></fieldset>
+     <div class="btnrow"><button class="tb primary" data-act="generate">Generate all <kbd>F7</kbd></button></div>`;
+  if (kind === 'ath') {
+    const i = state.designs.findIndex(d => d.id === a); const p = 'designs.' + i;
+    return head('i-ath', state.designs[i].name, 'Ath waveguide design. Generated mesh appears under Meshes.') +
+      `<fieldset><legend>Document</legend>${fld('Name', inp(p + '.name', 'str', 'Renamed design'), fid(p + '.name'))}${fld('Mesh enabled', inp(p + '.enabled', 'bool', 'Toggled design mesh'), fid(p + '.enabled'))}${fld('Translation mm', xyz(p, ['tx', 'ty', 'tz'], 'Moved design'))}</fieldset>
+       <fieldset class="stack"><legend>Ath script</legend><textarea id="${fid(p + '.text')}" data-path="${p}.text" data-t="str" data-label="Edited Ath script" spellcheck="false" aria-label="Ath script">${esc(state.designs[i].text)}</textarea></fieldset>
+       <div class="btnrow"><button class="tb primary" data-act="generate">Generate this design <kbd>F7</kbd></button></div>`;
+  }
+  if (id === 'meshes') {
+    const rows = [...state.designs.map(d => [d.name, 'generated from ' + d.name, d.enabled]), ...state.meshes.map(m => [m.name, m.source, m.enabled])];
+    return head('i-mesh', 'Meshes', 'Generated and imported meshes. Drop .msh files onto this node to import.') +
+      `<fieldset><legend>Symmetry</legend>${fld('Symmetry', sel('symmetry', [['Off', 'Off'], ['X', 'X'], ['XY', 'XY']], 'str', 'Changed symmetry'), fid('symmetry'))}<div class="hint">Reduced meshes must lie in the positive-X (or positive-X/Y) fundamental domain.</div></fieldset>
+       <div class="tbl-wrap"><table><thead><tr><th>Mesh</th><th>Source</th><th>Enabled</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r[0])}</td><td class="mono">${esc(r[1])}</td><td>${r[2] ? 'yes' : 'no'}</td></tr>`).join('')}</tbody></table></div>
+       <div class="btnrow"><button class="tb" data-act="import">Import .msh…</button></div>`;
+  }
+  if (kind === 'mesh') {
+    const d = state.designs.findIndex(x => x.id === a);
+    if (d >= 0) return head('i-mesh', state.designs[d].name, 'Generated mesh. Locked to its design document; edit the design under Geometry.') +
+      `<fieldset><legend>Mesh</legend>${fld('Source', `<input type="text" readonly value="Ath design ${esc(state.designs[d].name)}">`)}${fld('Enabled', inp('designs.' + d + '.enabled', 'bool', 'Toggled mesh'), fid('designs.' + d + '.enabled'))}${fld('Surfaces', `<input type="text" readonly value="${SURF.filter(s => s.mesh === a).length} physical groups">`)}</fieldset>
+       <div class="btnrow"><button class="tb" data-go="ath:${a}">Open design</button></div>`;
+    const i = state.meshes.findIndex(x => x.id === a); const p = 'meshes.' + i;
+    return head('i-mesh', state.meshes[i].name, 'Imported mesh. References keep working after Replace when physical-group names match.') +
+      `<fieldset><legend>Mesh</legend>${fld('Name', inp(p + '.name', 'str', 'Renamed mesh'), fid(p + '.name'))}${fld('Source file', `<input type="text" readonly value="${esc(state.meshes[i].source)}">`)}${fld('Enabled', inp(p + '.enabled', 'bool', 'Toggled mesh'), fid(p + '.enabled'))}${fld('Scale', inp(p + '.scale', 'num', 'Changed mesh scale', 'step="0.001"'), fid(p + '.scale'))}</fieldset>
+       <div class="btnrow"><button class="tb" data-act="import">Replace .msh…</button></div>`;
+  }
+  if (id === 'system') return head('i-sys', 'System', 'Physical model. The numerical path follows from the regions.') +
+    `<fieldset><legend>Inferred solve path</legend>${fld('Path', `<span class="path-pill">${solvePath()}</span>`)}<div class="hint">${state.regions.filter(r => r.type === 'Unbounded Exterior').length} unbounded and ${state.regions.filter(r => r.type === 'Bounded Interior').length} bounded regions. Electrodynamic components need a bounded region.</div></fieldset>
+     <div class="tbl-wrap"><table><tbody>
+       <tr class="click" data-go="regions"><td>Regions</td><td>${state.regions.length}</td></tr>
+       <tr class="click" data-go="boundaries"><td>Boundaries</td><td>${SURF.length}</td></tr>
+       <tr><td style="color:var(--faint)">Interfaces</td><td style="color:var(--faint)">needs both region types</td></tr>
+       <tr class="click" data-go="components"><td>Components</td><td>${state.components.length}</td></tr></tbody></table></div>`;
+  if (id === 'regions') return head('i-folder', 'Regions', 'Air volumes of the model.') +
+    `<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Mesh</th></tr></thead><tbody>${state.regions.map((r, i) =>
+      `<tr><td>${inp('regions.' + i + '.name', 'str', 'Renamed region')}</td><td>${sel('regions.' + i + '.type', ['Unbounded Exterior', 'Bounded Interior'], 'str', 'Changed region type')}</td><td>${esc(r.mesh)}</td></tr>`).join('')}</tbody></table></div>
+     <fieldset><legend>Exterior</legend>${fld('Stitch exterior region meshes', inp('stitch', 'bool', 'Toggled stitching'), fid('stitch'))}<div class="hint">Right-click Regions to add a Bounded Interior region: the solve path switches to Coupled FEM-BEM, Interfaces becomes available and components can be electrodynamic.</div></fieldset>`;
+  if (kind === 'region') {
+    const i = state.regions.findIndex(r => r.id === a); const p = 'regions.' + i;
+    return head('i-region', state.regions[i].name, 'Region') + `<fieldset><legend>Region</legend>${fld('Name', inp(p + '.name', 'str', 'Renamed region'), fid(p + '.name'))}${fld('Type', sel(p + '.type', ['Unbounded Exterior', 'Bounded Interior'], 'str', 'Changed region type'), fid(p + '.type'))}${fld('Mesh', `<input type="text" readonly value="${esc(state.regions[i].mesh)}">`)}</fieldset>`;
+  }
+  if (id === 'boundaries') return head('i-bnd', 'Boundaries', 'Every physical group in the enabled meshes. Moving boundaries must be owned by exactly one component.') +
+    `<div class="tbl-wrap"><table><thead><tr><th>Surface</th><th>Tag</th><th>Elements</th><th>State</th></tr></thead><tbody>${SURF.filter(s => meshEnabled(s.mesh)).map(s => { const o = ownerOf(s.sid);
+      return `<tr ${o ? `class="click" data-go="comp:${o.id}"` : ''}><td class="mono">${esc(surfLabel(s.sid))}</td><td>${s.tag}</td><td>${s.el.toLocaleString('en')}</td><td>${o ? `<span class="chip moving">moving · ${esc(o.name)}</span>` : '<span class="chip">rigid</span>'}</td></tr>`; }).join('')}</tbody></table></div>`;
+  if (id === 'interfaces') return head('i-ifc', 'Interfaces', 'FEM-BEM ports between bounded and unbounded regions.');
+  if (id === 'components') return head('i-folder', 'Components', 'Each component drives one or more moving boundaries and routes its response to a channel.') +
+    `<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Surfaces</th><th>Channel</th></tr></thead><tbody>${state.components.map(c =>
+      `<tr class="click" data-go="comp:${c.id}"><td>${esc(c.name)}</td><td>${esc(c.type)}</td><td>${c.surfaces.filter(s => s.use).length}</td><td>${esc(chanById(c.channel)?.name ?? '—')}</td></tr>`).join('')}</tbody></table></div>
+     <div class="btnrow"><button class="tb" data-act="addcomp">Add Prescribed Velocity</button></div>`;
+  if (kind === 'comp') {
+    const i = state.components.findIndex(c => c.id === a); const c = state.components[i]; const p = 'components.' + i;
+    const bounded = state.regions.some(r => r.type === 'Bounded Interior');
+    const ed = c.type === 'Electrodynamic Transducer';
+    return head('i-comp', c.name, 'Its moving surfaces are highlighted in the graphics area. The yellow arrow shows positive motion.') +
+      `<fieldset><legend>Component</legend>${fld('Name', inp(p + '.name', 'str', 'Renamed component'), fid(p + '.name'))}
+        ${fld('Type', sel(p + '.type', [['Prescribed Velocity', 'Prescribed Velocity'], ['Electrodynamic Transducer', 'Electrodynamic Transducer' + (bounded ? '' : ' (needs a bounded region)'), !bounded]], 'str', 'Changed component type'), fid(p + '.type'))}
+        ${fld('Channel', sel(p + '.channel', state.channels.map(ch => [ch.id, ch.name]), 'str', 'Changed component channel'), fid(p + '.channel'))}</fieldset>
+       <fieldset class="stack"><legend>Moving surfaces</legend><div class="tbl-wrap"><table><thead><tr><th>Use</th><th>Surface</th><th>Relative velocity dB</th></tr></thead><tbody>${c.surfaces.map((s, j) =>
+         `<tr><td>${inp(p + '.surfaces.' + j + '.use', 'bool', 'Toggled ' + surfLabel(s.sid), `aria-label="Use ${esc(surfLabel(s.sid))}"`)}</td><td class="mono">${esc(surfLabel(s.sid))}</td><td>${inp(p + '.surfaces.' + j + '.db', 'num', 'Changed relative velocity of ' + surfLabel(s.sid), `step="0.5" aria-label="Relative velocity of ${esc(surfLabel(s.sid))}"`)}</td></tr>`).join('') || '<tr><td colspan="3" style="color:var(--faint)">No surfaces yet. Pick rigid boundaries from Boundaries.</td></tr>'}</tbody></table></div></fieldset>
+       ${ed ? `<fieldset><legend>Rigid-piston transducer</legend>${['Re Ω', 'Le mH', 'Bl N/A', 'Mmd g', 'Cms µm/N', 'Rms N·s/m'].map(k => fld(k, '<input type="number" value="">')).join('')}</fieldset>` : ''}
+       <fieldset><legend>Motion</legend>${fld('Motion axis', sel(p + '.axis', ['Inferred', 'Manual'], 'str', 'Changed motion axis'), fid(p + '.axis'))}<div class="hint">Inferred: one axis for all selected surfaces, +Z here.</div></fieldset>`;
+  }
+  if (id === 'channels') return head('i-chan', 'Channels', 'Post-solve synthesis of the component bases. Changes resynthesize results without re-solving.') +
+    `<div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Trim dB</th><th>Pol.</th><th>Delay ms</th><th>HPF</th><th>LPF</th></tr></thead><tbody>${state.channels.map(c =>
+      `<tr class="click" data-go="chan:${c.id}"><td><span style="color:${c.color}">■</span> ${esc(c.name)}</td><td>${c.trim}</td><td>${c.polarity > 0 ? '+' : '−'}</td><td>${c.delay}</td><td>${c.hpf.on ? 'LR4 ' + c.hpf.f + ' Hz' : '—'}</td><td>${c.lpf.on ? 'LR4 ' + c.lpf.f + ' Hz' : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+  if (kind === 'chan') {
+    const i = state.channels.findIndex(c => c.id === a); const p = 'channels.' + i; const c = state.channels[i];
+    return head('i-chan', c.name, 'Watch the on-axis response update while you type. No re-solve needed.') +
+      `<fieldset><legend>Channel</legend>${fld('Name', inp(p + '.name', 'str', 'Renamed channel'), fid(p + '.name'))}${fld('Trim dB', inp(p + '.trim', 'num', 'Changed ' + c.name + ' trim', 'step="0.5"'), fid(p + '.trim'))}
+        ${fld('Polarity', sel(p + '.polarity', [[1, 'Normal (+)'], [-1, 'Inverted (−)']], 'num', 'Changed ' + c.name + ' polarity'), fid(p + '.polarity'))}${fld('Delay ms', inp(p + '.delay', 'num', 'Changed ' + c.name + ' delay', 'step="0.05" min="0"'), fid(p + '.delay'))}</fieldset>
+       <fieldset><legend>Crossover</legend>${fld('High-pass', inp(p + '.hpf.on', 'bool', 'Toggled ' + c.name + ' high-pass', 'aria-label="High-pass enabled"'), fid(p + '.hpf.on'))}${fld('HP frequency Hz', inp(p + '.hpf.f', 'num', 'Changed ' + c.name + ' high-pass', 'step="10" min="10"'), fid(p + '.hpf.f'))}
+        ${fld('Low-pass', inp(p + '.lpf.on', 'bool', 'Toggled ' + c.name + ' low-pass', 'aria-label="Low-pass enabled"'), fid(p + '.lpf.on'))}${fld('LP frequency Hz', inp(p + '.lpf.f', 'num', 'Changed ' + c.name + ' low-pass', 'step="10" min="10"'), fid(p + '.lpf.f'))}<div class="hint">Linkwitz-Riley, 4th order.</div></fieldset>
+       <fieldset><legend>Used by</legend><div class="hint" style="grid-column:1/-1">${state.components.filter(k => k.channel === c.id).map(k => `<a href="#" data-go="comp:${k.id}" style="color:var(--fg)">${esc(k.name)}</a>`).join(', ') || 'No components'}</div></fieldset>`;
+  }
+  if (id === 'solve') return head('i-solve', 'Solve', 'Frequency sweep. Backend comes from Edit › Preferences and is not stored in the project.') +
+    `<fieldset><legend>Frequencies</legend>${fld('Min Hz', inp('solve.fmin', 'num', 'Changed min frequency', 'min="1"'), fid('solve.fmin'))}${fld('Max Hz', inp('solve.fmax', 'num', 'Changed max frequency', 'min="1"'), fid('solve.fmax'))}${fld('Frequencies', inp('solve.n', 'num', 'Changed frequency count', 'min="2" step="10"'), fid('solve.n'))}</fieldset>
+     <fieldset><legend>Run</legend>${fld('Path', `<span class="path-pill">${solvePath()}</span>`)}${fld('Backend', '<input type="text" readonly value="BEAT CUDA (from Preferences)">')}${fld('Symmetry', `<input type="text" readonly value="${esc(state.symmetry)}">`)}
+       ${state.stale ? '<div class="hint warn">The model changed since the last solve. Results are out of date.</div>' : '<div class="hint">Results match the current model.</div>'}</fieldset>
+     <div class="btnrow"><button class="tb primary" data-act="solve">Compute <kbd>F5</kbd></button></div>`;
+  if (id === 'results') return head('i-res', 'Results', 'Plot groups. Selecting a group shows all of its plots; a group can hold any number of plots.') +
+    `<div class="tbl-wrap"><table><thead><tr><th>Plot group</th><th>Plots</th></tr></thead><tbody>${state.plotGroups.map(g => `<tr class="click" data-go="pg:${g.id}"><td>${esc(g.name)}</td><td>${g.plots.map(p => esc(p.title)).join(', ')}</td></tr>`).join('')}</tbody></table></div>
+     <div class="btnrow"><button class="tb" data-act="addpg">Add plot group</button></div>`;
+  if (kind === 'pg') {
+    const i = state.plotGroups.findIndex(g => g.id === a); const g = state.plotGroups[i];
+    return head('i-pg', g.name, 'All plots of this group are shown side by side in the graphics area.') +
+      `<fieldset><legend>Plot group</legend>${fld('Name', inp('plotGroups.' + i + '.name', 'str', 'Renamed plot group'), fid('plotGroups.' + i + '.name'))}</fieldset>
+       <div class="tbl-wrap"><table><thead><tr><th>Plot</th><th>Type</th></tr></thead><tbody>${g.plots.map(p => `<tr class="click" data-go="plot:${g.id}:${p.id}"><td>${esc(p.title)}</td><td>${PLOT_TYPES[p.type]}</td></tr>`).join('')}</tbody></table></div>
+       <fieldset><legend>Add plot</legend>${fld('Type', `<select id="addplot-type">${Object.entries(PLOT_TYPES).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>`, 'addplot-type')}<div class="hint"><button class="tb" data-act="addplot" data-pg="${g.id}">Add to ${esc(g.name)}</button></div></fieldset>`;
+  }
+  if (kind === 'plot') {
+    const gi = state.plotGroups.findIndex(g => g.id === a); const pi = state.plotGroups[gi].plots.findIndex(p => p.id === b); const p = 'plotGroups.' + gi + '.plots.' + pi; const pl = getPath(p);
+    let extra = '';
+    if ('ymin' in pl) extra += `<fieldset><legend>Axis</legend>${fld('Y min', inp(p + '.ymin', 'num', 'Changed plot limit'), fid(p + '.ymin'))}${fld('Y max', inp(p + '.ymax', 'num', 'Changed plot limit'), fid(p + '.ymax'))}</fieldset>`;
+    if (pl.show) extra += `<fieldset><legend>Traces</legend>${['Sum', ...state.channels.map(c => c.id)].map(k => { const path = p + '.show.' + k; if (getPath(path) === undefined) setPath(path, true);
+      return fld(k === 'Sum' ? 'Sum' : esc(chanById(k).name), inp(path, 'bool', 'Toggled trace ' + k), fid(path)); }).join('')}</fieldset>`;
+    return head(PLOT_ICON[pl.type], pl.title, PLOT_TYPES[pl.type] + ' in plot group “' + esc(state.plotGroups[gi].name) + '”. Highlighted in the graphics area.') +
+      `<fieldset><legend>Plot</legend>${fld('Title', inp(p + '.title', 'str', 'Renamed plot'), fid(p + '.title'))}</fieldset>${extra}
+       <div class="btnrow"><button class="tb" data-act="delplot" data-pg="${a}" data-plot="${b}">Delete plot</button></div>`;
+  }
+  return '';
+}
+function renderSettings() {
+  $('#settings').innerHTML = settingsHTML(selected);
+  const n = flat.find(x => x.id === selected); const crumbs = []; let p = selected; while (p) { const f = flat.find(x => x.id === p); if (f) crumbs.unshift(f.label); p = parentOf[p]; }
+  $('#settings-sub').textContent = crumbs.join(' › ');
+}
+
+/* live edit binding */
+const sEl = () => $('#settings');
+let focusOld = null;
+function readInput(el) { const t = el.dataset.t; if (t === 'bool') return el.checked; if (t === 'num') { const x = parseFloat(el.value); return isNaN(x) ? 0 : x; } return el.value; }
+document.addEventListener('focusin', e => { const el = e.target; if (el.dataset && el.dataset.path) focusOld = { path: el.dataset.path, val: clone(getPath(el.dataset.path)) }; });
+document.addEventListener('input', e => {
+  const el = e.target; if (!el.dataset || !el.dataset.path || el.type === 'checkbox' || el.tagName === 'SELECT') return;
+  setPath(el.dataset.path, readInput(el)); scheduleLive();
+});
+document.addEventListener('change', e => {
+  const el = e.target; if (!el.dataset || !el.dataset.path) return;
+  const path = el.dataset.path; const nw = readInput(el);
+  let old = focusOld && focusOld.path === path ? focusOld.val : getPath(path);
+  if (el.type === 'checkbox') old = !nw;
+  if (el.tagName === 'SELECT' && !(focusOld && focusOld.path === path)) old = getPath(path);
+  setPath(path, nw);
+  if (JSON.stringify(old) !== JSON.stringify(nw)) commit({ path, old: clone(old), new: clone(nw), label: el.dataset.label || 'Edited ' + path });
+  focusOld = { path, val: clone(nw) };
+  if (el.tagName === 'SELECT' || el.type === 'checkbox') renderAll(); else { renderTree(); renderGraphic(); }
+});
+let liveRaf = 0;
+function scheduleLive() { cancelAnimationFrame(liveRaf); liveRaf = requestAnimationFrame(() => { renderTree(); renderGraphic(); }); }
+
+/* ================= acoustics (example data) ================= */
+const cx = (re, im = 0) => ({ re, im });
+const cmul = (a, b) => cx(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
+const cdiv = (a, b) => { const d = b.re * b.re + b.im * b.im; return cx((a.re * b.re + a.im * b.im) / d, (a.im * b.re - a.re * b.im) / d); };
+const cadd = (a, b) => cx(a.re + b.re, a.im + b.im);
+const cabs = a => Math.hypot(a.re, a.im);
+function bw2(f, fc, hp) { const x = f / fc; const den = cx(1 - x * x, Math.SQRT2 * x); return hp ? cdiv(cx(-x * x), den) : cdiv(cx(1), den); }
+const lr4 = (f, fc, hp) => { const h = bw2(f, fc, hp); return cmul(h, h); };
+const NATURAL = { High: [900, 19000, 0.9], Mid: [180, 9000, 0.5], Low: [45, 2600, 0.0] };
+function chanResp(ch, f) {
+  const nat = NATURAL[ch.id] || [40, 20000, 0];
+  let h = cmul(bw2(f, nat[0], true), bw2(f, nat[1], false));
+  if (ch.hpf.on) h = cmul(h, lr4(f, Math.max(10, ch.hpf.f), true));
+  if (ch.lpf.on) h = cmul(h, lr4(f, Math.max(10, ch.lpf.f), false));
+  const ripple = 0.7 * Math.sin(3.1 * Math.log(f) + nat[2] * 4) + 0.35 * Math.sin(7.3 * Math.log(f) + nat[2]);
+  const comp = state.components.find(c => c.channel === ch.id);
+  const active = comp ? comp.surfaces.filter(s => s.use).length / Math.max(1, comp.surfaces.length) : 0;
+  const g = Math.pow(10, (92 + ripple + ch.trim) / 20) * ch.polarity * active;
+  const ph = -2 * Math.PI * f * ch.delay / 1000;
+  return cmul(cmul(h, cx(g)), cx(Math.cos(ph), Math.sin(ph)));
+}
+function freqs(range) { const n = Math.max(2, Math.min(400, range.n | 0)); const a = Math.log(Math.max(1, range.fmin)), b = Math.log(Math.max(range.fmin + 1, range.fmax)); return Array.from({ length: n }, (_, i) => Math.exp(a + (b - a) * i / (n - 1))); }
+const dB = a => 20 * Math.log10(Math.max(1e-9, cabs(a)));
+function responses() {
+  const fs = freqs(state.solved);
+  const per = state.channels.map(ch => ({ ch, h: fs.map(f => chanResp(ch, f)) }));
+  const sum = fs.map((_, i) => per.reduce((s, p) => cadd(s, p.h[i]), cx(0)));
+  return { fs, per, sum };
+}
+function groupDelay(fs, h) {
+  const ph = h.map(z => Math.atan2(z.im, z.re));
+  for (let i = 1; i < ph.length; i++) { while (ph[i] - ph[i - 1] > Math.PI) ph[i] -= 2 * Math.PI; while (ph[i] - ph[i - 1] < -Math.PI) ph[i] += 2 * Math.PI; }
+  return fs.map((f, i) => { const a = Math.max(0, i - 1), b = Math.min(fs.length - 1, i + 1); return -(ph[b] - ph[a]) / (2 * Math.PI * (fs[b] - fs[a])) * 1000; });
+}
+function beamwidth(f, vertical) {
+  const pts = vertical ? [[20, 360], [150, 330], [400, 150], [500, 80], [3000, 70], [4000, 60], [20000, 55]] : [[20, 360], [150, 340], [400, 170], [500, 95], [3000, 90], [4000, 85], [20000, 80]];
+  const lf = Math.log(f); for (let i = 1; i < pts.length; i++) if (f <= pts[i][0]) { const [f0, b0] = pts[i - 1], [f1, b1] = pts[i]; const t = (lf - Math.log(f0)) / (Math.log(f1) - Math.log(f0)); return b0 + (b1 - b0) * t; }
+  return pts.at(-1)[1];
+}
+function isoLevel(theta, f, vertical) {
+  const half = beamwidth(f, vertical) / 2; const a = Math.abs(theta);
+  let L = -6 * Math.pow(a / half, 2);
+  if (a > 90) L -= (a - 90) / 90 * 12 * Math.min(1, Math.log10(f / 100 + 1));
+  const xo = state.channels.find(c => c.id === 'Low')?.lpf.f || 400;
+  L -= 5 * Math.exp(-Math.pow(Math.log10(f / xo) / 0.07, 2)) * Math.min(1, a / 45);
+  L += 1.5 * Math.sin(a / 14 + Math.log(f) * 2) * Math.min(1, a / 60);
+  return Math.max(-30, Math.min(0, L));
+}
+
+/* ================= plotting ================= */
+const JET = ['#800000', '#ff0000', '#ff6000', '#ff9a00', '#ffd700', '#c8ff3c', '#46ffb0', '#1ec8ff', '#2878ff', '#0a1eff', '#00008c'];
+function fitCanvas(cv) { const r = cv.getBoundingClientRect(); const d = window.devicePixelRatio || 1; cv.width = Math.max(1, Math.round(r.width * d)); cv.height = Math.max(1, Math.round(r.height * d)); const c = cv.getContext('2d'); c.setTransform(d, 0, 0, d, 0, 0); return { c, w: r.width, h: r.height }; }
+const XT = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+const fmtHz = f => f >= 1000 ? (f / 1000) + 'k' : String(f);
+function axes(c, w, h, o) {
+  const L = 46, R = o.rightPad || 12, T = 24, B = 34; const pw = w - L - R, ph = h - T - B;
+  const x = f => L + (Math.log(f) - Math.log(o.xmin)) / (Math.log(o.xmax) - Math.log(o.xmin)) * pw;
+  const y = v => T + (1 - (v - o.ymin) / (o.ymax - o.ymin)) * ph;
+  c.fillStyle = '#fff'; c.fillRect(0, 0, w, h);
+  c.fillStyle = '#222'; c.font = '600 12px IBM Plex Sans, Segoe UI, sans-serif'; c.textAlign = 'center'; c.fillText(o.title, L + pw / 2, 15);
+  c.font = '10.5px IBM Plex Sans, Segoe UI, sans-serif'; c.strokeStyle = '#e2e2e2'; c.lineWidth = 1;
+  for (const f of XT) { if (f < o.xmin || f > o.xmax) continue; const xx = Math.round(x(f)) + .5; c.beginPath(); c.moveTo(xx, T); c.lineTo(xx, T + ph); c.stroke(); c.fillStyle = '#444'; c.fillText(fmtHz(f), xx, T + ph + 13); }
+  const step = o.ystep || niceStep(o.ymax - o.ymin);
+  c.textAlign = 'right';
+  for (let v = Math.ceil(o.ymin / step) * step; v <= o.ymax + 1e-9; v += step) { const yy = Math.round(y(v)) + .5; if (!o.noGrid) { c.beginPath(); c.moveTo(L, yy); c.lineTo(L + pw, yy); c.stroke(); } c.fillStyle = '#444'; c.fillText(+v.toFixed(2), L - 5, yy + 3.5); }
+  c.textAlign = 'center'; c.fillText('Frequency (Hz)', L + pw / 2, h - 5);
+  c.save(); c.translate(11, T + ph / 2); c.rotate(-Math.PI / 2); c.fillText(o.ylabel, 0, 0); c.restore();
+  c.strokeStyle = '#333'; c.strokeRect(L + .5, T + .5, pw, ph);
+  return { x, y, L, T, pw, ph };
+}
+function niceStep(r) { const raw = r / 5; const p = Math.pow(10, Math.floor(Math.log10(raw))); const m = raw / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; }
+function linePlot(cv, o) {
+  const { c, w, h } = fitCanvas(cv); if (w < 60 || h < 60) return;
+  const ax = axes(c, w, h, o);
+  c.save(); c.beginPath(); c.rect(ax.L, ax.T, ax.pw, ax.ph); c.clip();
+  for (const s of o.series) { c.strokeStyle = s.color; c.globalAlpha = s.alpha ?? 1; c.lineWidth = s.width || 1.5; c.beginPath(); s.pts.forEach(([f, v], i) => { const X = ax.x(f), Y = ax.y(v); i ? c.lineTo(X, Y) : c.moveTo(X, Y); }); c.stroke(); }
+  c.restore(); c.globalAlpha = 1;
+  const items = o.series.filter(s => s.name); if (!items.length) return;
+  c.font = '10.5px IBM Plex Sans, Segoe UI, sans-serif'; const lw = Math.max(...items.map(s => c.measureText(s.name).width)) + 34; const lh = 14 * items.length + 8;
+  const lx = ax.L + 8, ly = ax.T + ax.ph - lh - 8;
+  c.fillStyle = 'rgba(255,255,255,.92)'; c.strokeStyle = '#ccc'; c.fillRect(lx, ly, lw, lh); c.strokeRect(lx + .5, ly + .5, lw, lh);
+  items.forEach((s, i) => { const yy = ly + 11 + i * 14; c.strokeStyle = s.color; c.lineWidth = 2; c.beginPath(); c.moveTo(lx + 6, yy - 3); c.lineTo(lx + 22, yy - 3); c.stroke(); c.fillStyle = '#222'; c.textAlign = 'left'; c.fillText(s.name, lx + 27, yy); });
+}
+function isobarPlot(cv, o) {
+  const { c, w, h } = fitCanvas(cv); if (w < 60 || h < 60) return;
+  const ax = axes(c, w, h, { title: o.title, ylabel: 'Angle (deg)', xmin: state.solved.fmin, xmax: state.solved.fmax, ymin: -180, ymax: 180, ystep: 45, rightPad: 52, noGrid: true });
+  const nx = Math.min(180, Math.ceil(ax.pw / 3)), ny = Math.min(120, Math.ceil(ax.ph / 3));
+  const cw = ax.pw / nx, ch = ax.ph / ny;
+  for (let i = 0; i < nx; i++) { const f = Math.exp(Math.log(state.solved.fmin) + (Math.log(state.solved.fmax) - Math.log(state.solved.fmin)) * (i + .5) / nx);
+    for (let j = 0; j < ny; j++) { const th = 180 - 360 * (j + .5) / ny; const L = isoLevel(th, f, o.vertical); c.fillStyle = JET[Math.min(10, Math.floor(-L / 3))]; c.fillRect(ax.L + i * cw, ax.T + j * ch, cw + .6, ch + .6); } }
+  c.strokeStyle = '#333'; c.strokeRect(ax.L + .5, ax.T + .5, ax.pw, ax.ph);
+  const bx = ax.L + ax.pw + 10, bh = ax.ph / 11; c.font = '10px IBM Plex Sans, Segoe UI, sans-serif'; c.textAlign = 'left';
+  JET.forEach((col, i) => { c.fillStyle = col; c.fillRect(bx, ax.T + i * bh, 12, bh + .5); c.fillStyle = '#444'; if (i % 2 === 0) c.fillText(String(-3 * i), bx + 16, ax.T + i * bh + 4); });
+}
+function obsPlot(cv, o) {
+  const { c, w, h } = fitCanvas(cv); if (w < 60 || h < 60) return;
+  c.fillStyle = '#fff'; c.fillRect(0, 0, w, h); c.fillStyle = '#222'; c.font = '600 12px IBM Plex Sans, Segoe UI, sans-serif'; c.textAlign = 'center'; c.fillText(o.title + ' · 1 kHz, XZ plane', w / 2, 15);
+  const T = 22, S = Math.min(w - 70, h - T - 12); const x0 = (w - 50 - S) / 2, y0 = T + 4;
+  const img = c.createImageData(Math.round(S), Math.round(S)); const N = img.width; const k = 2 * Math.PI * 1000 / 343;
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const X = (i / N - .5) * 3, Z = (1 - j / N) * 3 - 0.9; const r = Math.hypot(X, Z) + .05; const th = Math.atan2(X, Z) * 180 / Math.PI;
+    const dir = Math.pow(10, isoLevel(th, 1000, false) / 20); let p = Math.cos(k * r) * dir / Math.sqrt(r * 2);
+    const inside = Math.abs(X) < .3 && Z < 0 && Z > -.4; if (inside) p = NaN;
+    const idx = (j * N + i) * 4;
+    if (isNaN(p)) { img.data[idx] = 70; img.data[idx + 1] = 74; img.data[idx + 2] = 78; img.data[idx + 3] = 255; continue; }
+    const t = Math.max(-1, Math.min(1, p * 1.6));
+    const [R, G, B] = t > 0 ? [255, 255 - 200 * t, 255 - 215 * t] : [255 + 200 * t, 255 + 150 * t, 255];
+    img.data[idx] = R; img.data[idx + 1] = G; img.data[idx + 2] = B; img.data[idx + 3] = 255;
+  }
+  const tmp = document.createElement('canvas'); tmp.width = N; tmp.height = N; tmp.getContext('2d').putImageData(img, 0, 0);
+  c.fillStyle = '#fff'; c.fillRect(0, T, w, h - T); c.imageSmoothingEnabled = true; c.drawImage(tmp, x0, y0, S, S);
+  c.strokeStyle = '#333'; c.strokeRect(x0 + .5, y0 + .5, S, S);
+  const bx = x0 + S + 12; const g = c.createLinearGradient(0, y0, 0, y0 + S); g.addColorStop(0, '#b4280a'); g.addColorStop(.5, '#ffffff'); g.addColorStop(1, '#3769ff');
+  c.fillStyle = g; c.fillRect(bx, y0, 12, S); c.fillStyle = '#444'; c.font = '10px IBM Plex Sans, Segoe UI, sans-serif'; c.textAlign = 'left'; c.fillText('+3', bx + 15, y0 + 8); c.fillText('0', bx + 15, y0 + S / 2 + 3); c.fillText('−3 Pa', bx + 15, y0 + S);
+}
+function drawPlot(cv, pl, emphasis) {
+  const R = responses();
+  if (pl.type === 'isoH' || pl.type === 'isoV') return isobarPlot(cv, { title: pl.title, vertical: pl.type === 'isoV' });
+  if (pl.type === 'obs') return obsPlot(cv, pl);
+  const show = k => !pl.show || pl.show[k] !== false;
+  if (pl.type === 'onaxis' || pl.type === 'chan' || pl.type === 'progress') {
+    const upto = pl.upto ?? R.fs.length;
+    const cut = arr => arr.slice(0, upto);
+    const series = R.per.filter(p => show(p.ch.id)).map(p => ({ name: p.ch.name, color: p.ch.color, width: emphasis ? (emphasis === p.ch.id ? 3 : 1.2) : 1.5, alpha: emphasis && emphasis !== p.ch.id ? .45 : 1, pts: cut(R.fs.map((f, i) => [f, dB(p.h[i])])) }));
+    if (show('Sum')) series.unshift({ name: 'Sum', color: '#000', width: 2, pts: cut(R.fs.map((f, i) => [f, dB(R.sum[i])])) });
+    return linePlot(cv, { title: pl.title, ylabel: 'SPL (dB)', xmin: state.solved.fmin, xmax: state.solved.fmax, ymin: pl.ymin ?? 50, ymax: pl.ymax ?? 100, series });
+  }
+  if (pl.type === 'gd') {
+    const series = [];
+    if (show('Sum')) series.push({ name: 'Sum', color: '#000', width: 2, pts: R.fs.map((f, i) => [f, 0]) });
+    const gs = groupDelay(R.fs, R.sum); if (series[0]) series[0].pts = R.fs.map((f, i) => [f, gs[i]]);
+    R.per.filter(p => show(p.ch.id)).forEach(p => { const g = groupDelay(R.fs, p.h); series.push({ name: p.ch.name, color: p.ch.color, width: 1.2, pts: R.fs.map((f, i) => [f, g[i]]) }); });
+    return linePlot(cv, { title: pl.title, ylabel: 'Group delay (ms)', xmin: state.solved.fmin, xmax: state.solved.fmax, ymin: pl.ymin ?? 0, ymax: pl.ymax ?? 8, series });
+  }
+  if (pl.type === 'spin') {
+    const on = R.fs.map((f, i) => dB(R.sum[i]));
+    const di = f => Math.max(0, 10 * Math.log10(41253 / (beamwidth(f, false) * beamwidth(f, true))) - 1);
+    const mk = (name, color, off) => ({ name, color, width: 1.5, pts: R.fs.map((f, i) => [f, on[i] - off(f)]) });
+    return linePlot(cv, { title: pl.title, ylabel: 'SPL (dB)', xmin: state.solved.fmin, xmax: state.solved.fmax, ymin: pl.ymin ?? 50, ymax: pl.ymax ?? 100, series: [
+      mk('On Axis', '#000', () => 0), mk('Listening Window', '#1f77b4', f => .4 + di(f) * .12), mk('Early Reflections', '#ff7f0e', f => 1 + di(f) * .55), mk('Sound Power', '#d62728', f => di(f)) ] });
+  }
+}
+
+/* ================= 3D view ================= */
+let view = { yaw: -0.55, pitch: 0.32 };
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+function newell(pts) { let n = [0, 0, 0]; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; n[0] += (a[1] - b[1]) * (a[2] + b[2]); n[1] += (a[2] - b[2]) * (a[0] + b[0]); n[2] += (a[0] - b[0]) * (a[1] + b[1]); } const l = Math.hypot(...n) || 1; return n.map(x => x / l); }
+function sePt(a, b, n, phi) { const c = Math.cos(phi), s = Math.sin(phi); return [a * Math.sign(c) * Math.pow(Math.abs(c), 2 / n), b * Math.sign(s) * Math.pow(Math.abs(s), 2 / n)]; }
+function buildScene() {
+  const polys = []; const holes = [];
+  const N = 36, Lr = 9;
+  for (const d of state.designs) {
+    if (!d.enabled) continue;
+    const g = d.id === 'hf' ? { A: 90, B: 70, rt: 13, depth: 90, rings: [[0, .4, 'SD1D1003'], [.4, .75, 'SD1D1002'], [.75, 1, 'SD1D1001']] } : d.id === 'mid' ? { A: 177.5, B: 167.5, rt: 25.5, depth: 200, rings: [[0, 1, 'SD1D1001']] } : null;
+    if (!g) continue;
+    const ring = t => { const a = g.rt + (g.A - g.rt) * Math.pow(t, 1.7), b = g.rt + (g.B - g.rt) * Math.pow(t, 1.7), n = 2 + 6 * t * t; return Array.from({ length: N }, (_, j) => { const [x, y] = sePt(a, b, n, 2 * Math.PI * j / N); return [x + d.tx, y + d.ty, -g.depth * (1 - t) + d.tz]; }); };
+    const rs = Array.from({ length: Lr + 1 }, (_, i) => ring(i / Lr));
+    for (let i = 0; i < Lr; i++) for (let j = 0; j < N; j++) { const k = (j + 1) % N; polys.push({ pts: [rs[i][j], rs[i][k], rs[i + 1][k], rs[i + 1][j]], sid: d.id + ':SD1G0', mesh: d.id, grp: 'in' }); }
+    holes.push(rs[Lr]);
+    const tz = -g.depth + d.tz;
+    for (const [r0, r1, nm] of g.rings) for (let j = 0; j < N; j++) { const a0 = 2 * Math.PI * j / N, a1 = 2 * Math.PI * (j + 1) / N; const P = (r, a) => [d.tx + g.rt * r * Math.cos(a), d.ty + g.rt * r * Math.sin(a), tz];
+      polys.push({ pts: r0 === 0 ? [P(0, 0), P(r1, a0), P(r1, a1)] : [P(r0, a0), P(r1, a0), P(r1, a1), P(r0, a1)], sid: d.id + ':' + nm, mesh: d.id, grp: 'in' }); }
+  }
+  const enc = state.meshes[0];
+  if (enc.enabled) {
+    const W = 300, H = 450, D = 400; const ox = enc.tx, oy = enc.ty, oz = enc.tz;
+    const woof = [['10', -130, -230], ['10b', 130, -230], ['10c', -130, -370], ['10d', 130, -370]];
+    const M = 24;
+    for (const [nm, x, y] of woof) {
+      const rr = [60, 40, 20, 0], zz = [0, -12, -24, -35];
+      const circ = r => Array.from({ length: M }, (_, j) => [ox + x + r * Math.cos(2 * Math.PI * j / M), oy + y + r * Math.sin(2 * Math.PI * j / M)]);
+      for (let i = 0; i < 3; i++) { const A = circ(rr[i]), B = circ(rr[i + 1]); for (let j = 0; j < M; j++) { const k = (j + 1) % M; polys.push({ pts: [[...A[j], oz + zz[i]], [...A[k], oz + zz[i]], [...B[k], oz + zz[i + 1]], [...B[j], oz + zz[i + 1]]], sid: 'enc:' + nm, mesh: 'enc', grp: 'in' }); } }
+      holes.push(circ(60).map(p => [...p, oz]));
+    }
+    const P = (x, y, z) => [ox + x, oy + y, oz + z];
+    polys.push({ pts: [P(-W, -H, 0), P(W, -H, 0), P(W, H, 0), P(-W, H, 0)], holes, sid: 'enc:front', mesh: 'enc', grp: 'front' });
+    const faces = [
+      [P(-W, -H, -D), P(-W, H, -D), P(W, H, -D), P(W, -H, -D)],
+      [P(-W, -H, 0), P(-W, H, 0), P(-W, H, -D), P(-W, -H, -D)],
+      [P(W, -H, 0), P(W, -H, -D), P(W, H, -D), P(W, H, 0)],
+      [P(-W, H, 0), P(W, H, 0), P(W, H, -D), P(-W, H, -D)],
+      [P(-W, -H, 0), P(-W, -H, -D), P(W, -H, -D), P(W, -H, 0)] ];
+    for (const f of faces) polys.push({ pts: f, sid: 'enc:rear', mesh: 'enc', grp: 'box' });
+  }
+  for (const p of polys) p.n = newell(p.pts);
+  return polys;
+}
+let lastDrawn = [];
+function draw3D(cv, spec) {
+  const { c, w, h } = fitCanvas(cv);
+  const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#2f3437'); g.addColorStop(1, '#1d2022'); c.fillStyle = g; c.fillRect(0, 0, w, h);
+  const cy_ = Math.cos(view.yaw), sy = Math.sin(view.yaw), cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+  const rot = ([x, y, z]) => { const x1 = x * cy_ + z * sy, z1 = -x * sy + z * cy_; return [x1, y * cp - z1 * sp, y * sp + z1 * cp]; };
+  const s = Math.min(w, h) / 1250; const ctr = rot([0, 0, -200]);
+  const pr = p => { const r = rot(p); return [w / 2 + (r[0] - ctr[0]) * s, h / 2 - (r[1] - ctr[1]) * s, r[2]]; };
+  const polys = buildScene();
+  const light = (() => { const l = [0.35, 0.55, 1]; const n = Math.hypot(...l); return l.map(x => x / n); })();
+  const items = [];
+  for (const p of polys) {
+    const rn = rot(p.n); if (p.grp !== 'in' && rn[2] <= 0) continue;
+    const pp = p.pts.map(pr); const depth = pp.reduce((a, q) => a + q[2], 0) / pp.length;
+    items.push({ p, pp, depth, shade: 0.42 + 0.58 * Math.abs(rn[0] * light[0] + rn[1] * light[1] + rn[2] * light[2]), hp: p.holes ? p.holes.map(hh => hh.map(pr)) : null });
+  }
+  const order = { in: 0, front: 1, box: 2 };
+  items.sort((a, b) => order[a.p.grp] - order[b.p.grp] || (a.p.grp === 'in' ? a.depth - b.depth : 0));
+  lastDrawn = [];
+  for (const it of items) {
+    const { p } = it; const owner = ownerOf(p.sid);
+    let base = owner ? [74, 143, 214] : [160, 166, 170];
+    if (spec.hi && spec.hi.has(p.sid)) base = [240, 176, 48];
+    const ghost = (spec.focusMeshes && !spec.focusMeshes.has(p.mesh)) || (spec.hi && spec.hi.size && spec.ghostOthers && !spec.hi.has(p.sid));
+    const col = base.map(v => Math.round(v * it.shade));
+    const path = new Path2D(); it.pp.forEach((q, i) => i ? path.lineTo(q[0], q[1]) : path.moveTo(q[0], q[1])); path.closePath();
+    if (it.hp) for (const hh of it.hp) { hh.forEach((q, i) => i ? path.lineTo(q[0], q[1]) : path.moveTo(q[0], q[1])); path.closePath(); }
+    c.globalAlpha = ghost ? 0.22 : 1; c.fillStyle = `rgb(${col})`; c.fill(path, 'evenodd');
+    c.strokeStyle = ghost ? 'rgba(0,0,0,.08)' : 'rgba(0,0,0,.28)'; c.lineWidth = .6; if (p.grp === 'in') c.stroke(path); else { c.lineWidth = 1; c.stroke(path); }
+    c.globalAlpha = 1; lastDrawn.push({ path, sid: p.sid, mesh: p.mesh });
+  }
+  // axes
+  const o = pr([0, 0, 0]); [[[260, 0, 0], '#e04848'], [[0, 260, 0], '#4a7fe0'], [[0, 0, 360], '#f0c419']].forEach(([e, col]) => { const q = pr(e); c.strokeStyle = col; c.lineWidth = 1.2; c.globalAlpha = .85; c.beginPath(); c.moveTo(o[0], o[1]); c.lineTo(q[0], q[1]); c.stroke(); });
+  c.globalAlpha = 1;
+  // motion arrows
+  for (const comp of spec.arrows || []) {
+    const pts = []; for (const s of comp.surfaces) if (s.use) for (const p of polys) if (p.sid === s.sid) pts.push(...p.pts);
+    if (!pts.length) continue;
+    const m = [0, 1, 2].map(k => pts.reduce((a, q) => a + q[k], 0) / pts.length);
+    const a = pr(m), b = pr([m[0], m[1], m[2] + 220]);
+    c.strokeStyle = '#ffd23f'; c.fillStyle = '#ffd23f'; c.lineWidth = 3; c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke();
+    const ang = Math.atan2(b[1] - a[1], b[0] - a[0]); c.beginPath(); c.moveTo(b[0], b[1]); c.lineTo(b[0] - 12 * Math.cos(ang - .4), b[1] - 12 * Math.sin(ang - .4)); c.lineTo(b[0] - 12 * Math.cos(ang + .4), b[1] - 12 * Math.sin(ang + .4)); c.closePath(); c.fill();
+  }
+}
+
+/* ================= graphics area ================= */
+function graphicSpec(id) {
+  const [kind, a, b] = id.split(':');
+  if (kind === 'ath' || (kind === 'mesh')) return { t: '3d', focusMeshes: new Set([a]), label: 'Mesh preview · ' + meshName(a) + ' (others ghosted)' };
+  if (kind === 'comp') { const c = state.components.find(x => x.id === a); return { t: '3d', hi: new Set(c.surfaces.filter(s => s.use).map(s => s.sid)), ghostOthers: false, arrows: [c], label: 'Mesh preview · ' + c.name + ' surfaces highlighted' }; }
+  if (id === 'components') return { t: '3d', arrows: state.components, label: 'Mesh preview · all components with motion direction' };
+  if (id === 'boundaries') return { t: '3d', label: 'Mesh preview · moving boundaries in blue' };
+  if (kind === 'chan') return { t: 'plot', plots: [{ type: 'chan', title: 'On-Axis Frequency Response' }], emphasis: a, label: 'On-axis response · ' + chanById(a).name + ' emphasized, live' };
+  if (id === 'channels') return { t: 'plot', plots: [{ type: 'onaxis', title: 'On-Axis Frequency Response' }], label: 'On-axis response, all channels' };
+  if (id === 'solve') return { t: 'solve', label: solving ? 'Solving…' : 'Last solve' };
+  if (id === 'results') return { t: 'plots', pg: state.plotGroups[0], label: 'Plot group · ' + state.plotGroups[0].name };
+  if (kind === 'pg') { const g = state.plotGroups.find(x => x.id === a); return { t: 'plots', pg: g, label: 'Plot group · ' + g.name + ' · ' + g.plots.length + ' plots' }; }
+  if (kind === 'plot') { const g = state.plotGroups.find(x => x.id === a); return { t: 'plots', pg: g, focus: b, label: 'Plot group · ' + g.name + ' · selected plot outlined' }; }
+  return { t: '3d', label: 'Mesh preview' };
+}
+let curSpec = null;
+function renderGraphic() {
+  const spec = graphicSpec(selected); curSpec = spec; const gfx = $('#gfx');
+  $('#gfx-sub').textContent = spec.label;
+  if (spec.t === '3d') {
+    if (!gfx.querySelector('canvas.view3d')) {
+      gfx.innerHTML = `<canvas class="view3d" aria-label="3D mesh preview; drag to rotate"></canvas><div class="drag-hint">drag to rotate</div><div class="legend3d"><span style="--c:#a0a6aa">rigid</span><span style="--c:#4a8fd6">moving</span><span style="--c:#f0b030">selected</span><span style="--c:#ffd23f">motion +</span></div><div class="readout" id="readout"></div><div class="tip" hidden></div>`;
+      bind3D(gfx.querySelector('canvas'));
+    }
+    const els = SURF.filter(s => meshEnabled(s.mesh)).reduce((a, s) => a + s.el, 0);
+    $('#readout').textContent = `Total elements: ${els.toLocaleString('en')} | 600mm x 900mm x 400mm (WHD)`;
+    draw3D(gfx.querySelector('canvas'), spec);
+    $('#gfx-tools').innerHTML = `<button class="icon-btn" title="Isolate bounded interior (no bounded region)" disabled style="opacity:.4">◧</button><button class="icon-btn" title="Isolate unbounded exterior" aria-label="Isolate unbounded exterior">◨</button>`;
+    return;
+  }
+  $('#gfx-tools').innerHTML = `<button class="icon-btn" title="Save as PNG" aria-label="Save as PNG">⤓</button>`;
+  if (spec.t === 'plot') {
+    gfx.innerHTML = `<div class="plotgrid" style="--cols:1"><div class="plotcell"><canvas></canvas></div></div>`;
+    drawPlot(gfx.querySelector('canvas'), spec.plots[0], spec.emphasis); return;
+  }
+  if (spec.t === 'solve') {
+    const n = freqs(state.solve).length;
+    gfx.innerHTML = `<div class="solvebar"><span id="sv-txt">${solving ? 'Solving' : state.stale ? 'Results out of date. Press Compute (F5).' : 'Solve complete'}</span><div class="bar"><i id="sv-bar" style="width:${solving ? solveK / n * 100 : 100}%"></i></div><span id="sv-n">${solving ? solveK : freqs(state.solved).length} / ${n}</span></div><div class="plotgrid" style="--cols:1;top:40px"><div class="plotcell"><canvas></canvas></div></div>`;
+    drawPlot(gfx.querySelector('canvas'), { type: 'progress', title: solving ? 'Live: On-Axis Frequency Response' : 'On-Axis Frequency Response', upto: solving ? solveK : undefined }); return;
+  }
+  const g = spec.pg; const n = g.plots.length; const cols = n <= 1 ? 1 : n <= 4 ? 2 : 3;
+  gfx.innerHTML = `<div class="plotgrid" style="--cols:${cols}">${g.plots.map(p => `<div class="plotcell${spec.focus === p.id ? ' focus' : ''}" data-go="plot:${g.id}:${p.id}" title="Select ${esc(p.title)}"><div class="ph"><span>${esc(p.title)}</span><span>${PLOT_TYPES[p.type]}</span></div><canvas></canvas></div>`).join('') || '<p style="color:var(--muted);padding:20px">Empty plot group. Add a plot from the settings panel.</p>'}</div>`;
+  requestAnimationFrame(() => gfx.querySelectorAll('.plotcell').forEach((cell, i) => drawPlot(cell.querySelector('canvas'), g.plots[i])));
+}
+function bind3D(cv) {
+  let drag = null; const tip = () => $('#gfx .tip');
+  cv.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, yaw: view.yaw, pitch: view.pitch }; cv.setPointerCapture(e.pointerId); tip().hidden = true; });
+  cv.addEventListener('pointermove', e => {
+    if (drag) { view.yaw = Math.max(-1.25, Math.min(1.25, drag.yaw + (e.clientX - drag.x) * 0.008)); view.pitch = Math.max(-1.0, Math.min(1.0, drag.pitch + (e.clientY - drag.y) * 0.008)); draw3D(cv, curSpec); return; }
+    const r = cv.getBoundingClientRect(); const x = e.clientX - r.left, y = e.clientY - r.top; const c = cv.getContext('2d'); const d = window.devicePixelRatio || 1;
+    c.setTransform(d, 0, 0, d, 0, 0);
+    let hit = null; for (let i = lastDrawn.length - 1; i >= 0; i--) if (c.isPointInPath(lastDrawn[i].path, x * d, y * d, 'evenodd')) { hit = lastDrawn[i]; break; }
+    const t = tip(); if (!hit) { t.hidden = true; return; }
+    const s = surf(hit.sid); const o = ownerOf(hit.sid);
+    t.innerHTML = `Mesh: ${esc(meshName(hit.mesh))} | Surface: ${esc(s.name)} | Tag: ${s.tag} | Elements: ${s.el.toLocaleString('en')}${o ? ` | <b style="color:#9cc4ee">${esc(o.name)}</b>` : ''}`;
+    t.hidden = false; t.style.left = Math.min(x + 14, r.width - t.offsetWidth - 6) + 'px'; t.style.top = (y + 16) + 'px';
+  });
+  cv.addEventListener('pointerup', () => { drag = null; });
+  cv.addEventListener('pointerleave', () => { tip().hidden = true; });
+}
+
+/* ================= actions ================= */
+let solving = false, solveK = 0, solveTimer = 0;
+function startSolve() {
+  if (solving) return; solving = true; solveK = 0; $('#b-stop').disabled = false; $('#b-solve').disabled = true;
+  state.solved = { ...state.solve }; const n = freqs(state.solve).length;
+  if (selected !== 'solve') status('Solving ' + solvePath() + ' on BEAT CUDA… select Solve to watch live');
+  renderTree(); renderGraphic();
+  solveTimer = setInterval(() => {
+    solveK = Math.min(n, solveK + Math.max(1, Math.round(n / 70)));
+    const f = freqs(state.solve)[solveK - 1];
+    status(`Solving ${solveK} / ${n} · ${f >= 1000 ? (f / 1000).toFixed(2) + ' kHz' : f.toFixed(0) + ' Hz'}`);
+    if (selected === 'solve') { const bar = $('#sv-bar'); if (bar) { bar.style.width = solveK / n * 100 + '%'; $('#sv-n').textContent = solveK + ' / ' + n; drawPlot($('#gfx canvas'), { type: 'progress', title: 'Live: On-Axis Frequency Response', upto: solveK }); } }
+    if (solveK >= n) finishSolve(true);
+  }, 50);
+}
+function finishSolve(done) { clearInterval(solveTimer); solving = false; $('#b-stop').disabled = true; $('#b-solve').disabled = false; if (done) state.stale = false; status(done ? 'Solve complete · ' + freqs(state.solved).length + ' frequencies' : 'Stopped. Completed frequencies remain available.'); renderAll(); }
+function generate() { status('Generating meshes: staging Ath scripts, meshing in Gmsh…'); setTimeout(() => { state.stale = true; status('Generated ' + state.designs.filter(d => d.enabled).map(d => d.name).join(', ') + ' · results out of date'); renderAll(); }, 700); }
+function act(name, el) {
+  if (name === 'generate') return generate();
+  if (name === 'solve') return startSolve();
+  if (name === 'import') return status('In the app this opens the file picker. Dropping a .msh onto the Meshes node imports it too.');
+  if (name === 'addcomp') return addComponent('Prescribed Velocity');
+  if (name === 'addpg') return addPlotGroup();
+  if (name === 'addplot') return addPlot(el.dataset.pg, $('#addplot-type').value);
+  if (name === 'delplot') return delPlot(el.dataset.pg, el.dataset.plot);
+}
+function addComponent(type) { const id = 'c' + (++uid); structural('components', 'Added component', arr => arr.push({ id, name: 'Component ' + (arr.length + 1), type, channel: state.channels[0].id, axis: 'Inferred', surfaces: [] })); select('comp:' + id); }
+function addPlotGroup() { const id = 'g' + (++uid); structural('plotGroups', 'Added plot group', arr => arr.push({ id, name: 'Plot Group ' + (arr.length + 1), plots: [] })); select('pg:' + id); }
+function addPlot(pg, type) { const gi = state.plotGroups.findIndex(g => g.id === pg); const id = 'p' + (++uid); const p = { id, type, title: PLOT_TYPES[type] }; if (['onaxis', 'spin'].includes(type)) { p.ymin = 50; p.ymax = 100; } if (type === 'gd') { p.ymin = 0; p.ymax = 8; } if (['onaxis', 'gd'].includes(type)) p.show = {};
+  structural('plotGroups.' + gi + '.plots', 'Added ' + PLOT_TYPES[type], arr => arr.push(p)); select('pg:' + pg); }
+function delPlot(pg, pid) { const gi = state.plotGroups.findIndex(g => g.id === pg); structural('plotGroups.' + gi + '.plots', 'Deleted plot', arr => arr.splice(arr.findIndex(p => p.id === pid), 1)); select('pg:' + pg); }
+function delFrom(path, id, label, after) { structural(path, label, arr => arr.splice(arr.findIndex(x => x.id === id), 1)); select(after); }
+function duplicate(path, id, label, prefix) { const nid = 'x' + (++uid); structural(path, label, arr => { const i = arr.findIndex(x => x.id === id); const c = clone(arr[i]); c.id = nid; c.name += ' copy'; if (c.surfaces) c.surfaces = []; arr.splice(i + 1, 0, c); }); select(prefix + nid); }
+
+function menuFor(id) {
+  const [kind, a, b] = id.split(':'); const bounded = state.regions.some(r => r.type === 'Bounded Interior');
+  const m = [];
+  if (id === 'geometry') m.push(['Add Ath design', () => { const nid = 'd' + (++uid); structural('designs', 'Added Ath design', arr => arr.push({ id: nid, name: 'Design ' + (arr.length + 1), enabled: true, scale: .001, tx: 0, ty: 0, tz: 0, text: 'Throat.Profile = 1\nThroat.Diameter = 25.4 ; [mm]\nLength = 120 ;\n' })); select('ath:' + nid); }], ['Generate all', generate, 'F7']);
+  if (kind === 'ath') m.push(['Generate mesh', generate, 'F7'], ['Duplicate', () => duplicate('designs', a, 'Duplicated design', 'ath:')], '-', ['Delete', () => delFrom('designs', a, 'Deleted design', 'geometry')]);
+  if (id === 'meshes') m.push(['Import .msh…', () => act('import')], ['Symmetry: X', () => { const old = state.symmetry; state.symmetry = 'X'; commit({ path: 'symmetry', old, new: 'X', label: 'Changed symmetry' }); renderAll(); }]);
+  if (kind === 'mesh' && state.meshes.some(x => x.id === a)) m.push(['Replace .msh…', () => act('import')]);
+  if (kind === 'mesh' && state.designs.some(x => x.id === a)) m.push(['Open design', () => select('ath:' + a)]);
+  if (id === 'regions') m.push(['Add region', () => { const nid = 'r' + (++uid); structural('regions', 'Added region', arr => arr.push({ id: nid, name: 'Region ' + (arr.length + 1), type: 'Bounded Interior', mesh: '—' })); select('region:' + nid); }]);
+  if (kind === 'region') m.push(['Delete', () => delFrom('regions', a, 'Deleted region', 'regions')]);
+  if (id === 'components') m.push(['Add Prescribed Velocity', () => addComponent('Prescribed Velocity')], ['Add Electrodynamic Transducer', () => addComponent('Electrodynamic Transducer'), '', !bounded, 'Needs a bounded interior region. Exterior-only systems support prescribed velocity.']);
+  if (kind === 'comp') m.push(['Duplicate', () => duplicate('components', a, 'Duplicated component', 'comp:')], '-', ['Delete', () => delFrom('components', a, 'Deleted component', 'components')]);
+  if (id === 'channels') m.push(['Add channel', () => { const nid = 'Ch' + (++uid); structural('channels', 'Added channel', arr => arr.push({ id: nid, name: 'Channel ' + (arr.length + 1), color: '#9467bd', trim: 0, polarity: 1, delay: 0, hpf: { on: false, f: 100 }, lpf: { on: false, f: 1000 } })); select('chan:' + nid); }]);
+  if (kind === 'chan') m.push(['Delete', () => delFrom('channels', a, 'Deleted channel', 'channels'), '', state.components.some(c => c.channel === a), 'Used by a component. Reassign it first.']);
+  if (id === 'solve') m.push(['Compute', startSolve, 'F5']);
+  if (id === 'results') m.push(['Add plot group', addPlotGroup]);
+  if (kind === 'pg') { m.push(...Object.entries(PLOT_TYPES).map(([k, l]) => ['Add ' + l, () => addPlot(a, k)])); m.push('-', ['Delete plot group', () => delFrom('plotGroups', a, 'Deleted plot group', 'results'), '', state.plotGroups.length < 2, 'Keep at least one plot group.']); }
+  if (kind === 'plot') m.push(['Delete plot', () => delPlot(a, b)]);
+  return m;
+}
+function openMenu(id, x, y) {
+  const items = menuFor(id); const ctx = $('#ctx');
+  if (!items.length) { ctx.hidden = true; status('Nothing to add here.'); return; }
+  ctx.innerHTML = items.map((it, i) => it === '-' ? '<hr>' : `<button role="menuitem" data-i="${i}" ${it[3] ? 'disabled' : ''}>${esc(it[0])}${it[2] ? `<small>${it[2]}</small>` : ''}</button>${it[3] && it[4] ? `<div class="why">${esc(it[4])}</div>` : ''}`).join('');
+  ctx.hidden = false; const r = ctx.getBoundingClientRect();
+  ctx.style.left = Math.max(4, Math.min(x, innerWidth - r.width - 8)) + 'px'; ctx.style.top = Math.max(4, Math.min(y, innerHeight - r.height - 8)) + 'px';
+  ctx.onclick = e => { const bt = e.target.closest('button'); if (!bt || bt.disabled) return; ctx.hidden = true; items[+bt.dataset.i][1](); };
+  const first = ctx.querySelector('button:not(:disabled)'); first && first.focus();
+}
+
+/* ================= wiring ================= */
+function status(t) { $('#status').textContent = t; }
+function renderAll() { renderTree(); renderSettings(); renderGraphic(); $('#status-r').textContent = solvePath() + ' · BEAT CUDA'; }
+
+$('#tree').addEventListener('click', e => { const row = e.target.closest('.row'); if (!row) return; const id = row.dataset.id;
+  if (e.target.dataset.tw) { expanded.has(id) ? expanded.delete(id) : expanded.add(id); renderTree(); return; } select(id); });
+$('#tree').addEventListener('dblclick', e => { const row = e.target.closest('.row'); if (!row) return; const id = row.dataset.id; expanded.has(id) ? expanded.delete(id) : expanded.add(id); renderTree(); });
+$('#tree').addEventListener('contextmenu', e => { const row = e.target.closest('.row'); if (!row) return; e.preventDefault(); if (row.dataset.id !== selected) select(row.dataset.id); openMenu(row.dataset.id, e.clientX, e.clientY); });
+$('#tree').addEventListener('keydown', e => {
+  const vis = [...document.querySelectorAll('#tree .row')].map(r => r.dataset.id); const i = vis.indexOf(selected);
+  const n = flat.find(x => x.id === selected);
+  if (e.key === 'ArrowDown') { e.preventDefault(); let j = i + 1; while (j < vis.length && flat.find(x => x.id === vis[j]).disabled) j++; if (j < vis.length) select(vis[j]); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); let j = i - 1; while (j >= 0 && flat.find(x => x.id === vis[j]).disabled) j--; if (j >= 0) select(vis[j]); }
+  else if (e.key === 'ArrowRight' && n.children?.length) { expanded.add(selected); renderTree(); }
+  else if (e.key === 'ArrowLeft') { if (expanded.has(selected) && n.children?.length) { expanded.delete(selected); renderTree(); } else if (parentOf[selected]) select(parentOf[selected]); }
+  else if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); const r = document.querySelector('.row.sel').getBoundingClientRect(); openMenu(selected, r.left + 30, r.bottom); }
+  else return;
+  const row = document.querySelector('.row.sel'); row && row.focus();
+});
+document.addEventListener('click', e => {
+  const ctx = $('#ctx'); if (!ctx.hidden && !ctx.contains(e.target) && !e.target.closest('#b-add,#tree-add')) ctx.hidden = true;
+  const go = e.target.closest('[data-go]'); if (go && !e.target.closest('input,select,textarea')) { e.preventDefault(); if (go.closest('#view-compare')) showView('proto'); select(go.dataset.go); document.getElementById('app').scrollIntoView({ block: 'nearest' }); return; }
+  const a = e.target.closest('[data-act]'); if (a) act(a.dataset.act, a);
+});
+const addAt = btn => { const r = btn.getBoundingClientRect(); openMenu(selected, r.left, r.bottom + 2); };
+$('#b-add').addEventListener('click', e => addAt(e.currentTarget));
+$('#tree-add').addEventListener('click', e => addAt(e.currentTarget));
+$('#b-undo').addEventListener('click', undo); $('#b-redo').addEventListener('click', redo);
+$('#b-solve').addEventListener('click', startSolve); $('#b-stop').addEventListener('click', () => finishSolve(false)); $('#b-gen').addEventListener('click', generate);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') $('#ctx').hidden = true;
+  if ($('#view-proto').hidden) return;
+  const inText = e.target.matches && e.target.matches('input[type=text],input[type=number],textarea');
+  if ((e.ctrlKey || e.metaKey) && !inText && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  else if ((e.ctrlKey || e.metaKey) && !inText && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+  else if (e.key === 'F5' && e.shiftKey) { e.preventDefault(); if (solving) finishSolve(false); }
+  else if (e.key === 'F5') { e.preventDefault(); startSolve(); }
+  else if (e.key === 'F7') { e.preventDefault(); generate(); }
+});
+// splitter
+(() => { const sp = $('#splitter'), panes = $('#panes'); let st = null;
+  sp.addEventListener('pointerdown', e => { st = { x: e.clientX, w: $('#settings').parentElement.getBoundingClientRect().width }; sp.setPointerCapture(e.pointerId); sp.classList.add('drag'); });
+  sp.addEventListener('pointermove', e => { if (!st) return; const w = Math.max(280, Math.min(panes.clientWidth - 250 - 300, st.w + e.clientX - st.x)); panes.style.setProperty('--settings-w', w + 'px'); });
+  sp.addEventListener('pointerup', () => { st = null; sp.classList.remove('drag'); renderGraphic(); }); })();
+// view switch
+function showView(v) { $('#view-proto').hidden = v !== 'proto'; $('#view-compare').hidden = v !== 'compare'; document.querySelectorAll('.views button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === v)); try { localStorage.setItem('blab-mt-view', v); } catch (e) {} if (v === 'proto') renderGraphic(); }
+document.querySelectorAll('.views button').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
+let ro; ro = new ResizeObserver(() => { cancelAnimationFrame(ro.f); ro.f = requestAnimationFrame(() => { if (!$('#view-proto').hidden) renderGraphic(); }); }); ro.observe($('#gfx'));
+
+renderAll();
+try { if (location.hash === '#compare' || localStorage.getItem('blab-mt-view') === 'compare') showView('compare'); } catch (e) {}
+document.fonts && document.fonts.ready.then(() => renderGraphic());
+})();
+</script>
