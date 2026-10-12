@@ -1,20 +1,48 @@
 {
   "allow": [
-    "python -m pytest *", "pytest *", "python -m ruff *", "ruff *", "python -m beat_engine *",
-    "python --version", "python -m py_compile *", "python -m pip show *", "python -m pip list *",
-    "python -m pip check", "python -m pip install -e *", "pip show *", "pip list *",
-    "blab --help", "blab * --help", "blab * -h", "blab project validate *",
-    "blab project evaluate-fem *", "blab project compare-fem *", "blab project speaker-preflight *",
-    "blab project export-speaker *", "blab prepare *", "blab clean *", "blab plot *",
+    "python -m pytest *",
+    "pytest *",
+    "python -m ruff *",
+    "ruff *",
+    "python -m beat_engine *",
+    "python --version",
+    "python -m py_compile *",
+    "python -m pip show *",
+    "python -m pip list *",
+    "python -m pip check",
+    "python -m pip install -e *",
+    "pip show *",
+    "pip list *",
+    "blab --help",
+    "blab * --help",
+    "blab * -h",
+    "blab project validate *",
+    "blab project evaluate-fem *",
+    "blab project compare-fem *",
+    "blab project speaker-preflight *",
+    "blab project export-speaker *",
+    "blab prepare *",
+    "blab clean *",
+    "blab plot *",
     "blab conform-interface *"
   ],
   "ask": [
-    "blab project solve *", "blab solve *", "blab gui *", "blab server *", "blab rocm *"
+    "blab project solve *",
+    "blab solve *",
+    "blab gui *",
+    "blab server *",
+    "blab rocm *"
   ],
   "dangerous": [
-    ["\\bgit\\s+add\\b[^;&|\\n]*(^|\\s)\\S*runs/", "staging generated runs/ artifacts"]
+    [
+      "\\bgit\\s+add\\b[^;&|\\n]*(^|\\s)\\S*runs/",
+      "staging generated runs/ artifacts"
+    ]
   ],
   "protected_paths": [
     "(^|[\\\\/])runs[\\\\/]"
+  ],
+  "paths": [
+    "~/Documents/BEAT_Engine"
   ]
 }
