@@ -6,7 +6,7 @@ Fork-local agent config: versioned on orphan branch `agent-config` (worktree `.a
 
 ### Issue tracker
 
-Issues live on upstream GitHub `JWSound/boundary-lab`; PRs go from fork `Finnitio/boundary-lab` branches to upstream. See `.agent/docs/agents/issue-tracker.md`.
+Local markdown under `.agent/work/<feature>/` (fork-local, never upstream); PRs go from fork `Finnitio/boundary-lab` branches to upstream. See `.agent/docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
