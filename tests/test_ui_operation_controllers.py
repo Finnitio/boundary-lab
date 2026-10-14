@@ -9,6 +9,7 @@ from blab.system_contract import SystemFrequencyResult
 from blab.ui.application_state import OperationPhase
 from blab.ui.operation_controllers import GeometryController, SolveController
 from blab.ui.system_solve import SystemSolveWorker
+from blab.warm_up_history import WarmUpHistory, WarmUpKey
 
 
 class _SolveWorkerStub(QObject):
@@ -66,7 +67,6 @@ def test_solve_controller_owns_worker_thread_and_completion_state(qapp, monkeypa
     app = QCoreApplication.instance() or QCoreApplication([])
     monkeypatch.setattr(controller_module, "SystemSolveWorker", _SolveWorkerStub)
     controller = SolveController()
-    controller._streaming = True  # A new run must restore startup messages.
     statuses = []
     controller.status.connect(statuses.append)
     results = []
@@ -111,14 +111,16 @@ def test_streaming_status_updates_only_for_completed_frequencies(qapp):
     controller.status.connect(statuses.append)
     controller._on_status("Loading backend")
     controller._on_initialized(np.array([0.0]), np.array(["driver"]), None)
-    controller._on_status("Assembling first frequency")
     assert controller.state.message == "Solving... · 0:00"
+    # BEAT reports its warm-up phases after the worker announces the session.
+    controller._on_status("Preparing BEAT CPU geometry caches")
+    assert controller.state.message == "Preparing BEAT CPU geometry caches · 0:00"
     controller._on_result(_SolveWorkerStub.result)
     expected = "Solving 1/2 · 0:00 elapsed"
     assert controller.state.message == expected
     controller._on_status("Computing field for next frequency")
     assert controller.state.message == expected
-    assert statuses == ["Loading backend · 0:00", expected]
+    assert statuses == ["Loading backend · 0:00", "Preparing BEAT CPU geometry caches · 0:00", expected]
     controller._on_result(
         SystemFrequencyResult(
             freq_hz=2000.0, quantities=(), excitation_port_ids=(), diagnostics=_SolveWorkerStub.result.diagnostics
@@ -185,7 +187,7 @@ def test_warm_up_status_ticks_elapsed_time_until_first_result(qapp):
 
 
 def test_warm_up_shows_prediction_and_records_duration_at_first_result(qapp, tmp_path):
-    from blab.warm_up_history import WarmUpHistory, WarmUpKey
+    from blab.warm_up_history import WarmUpKey
 
     key = WarmUpKey("cpu", "0.4.0", "8", True)
     history = WarmUpHistory(tmp_path / "history.json")
@@ -202,19 +204,22 @@ def test_warm_up_shows_prediction_and_records_duration_at_first_result(qapp, tmp
     controller._on_warm_up_key(key)
     now[0] = 195.0
     controller._on_status("Preparing BEAT CPU geometry caches")
-    now[0] = 160.0 + 40.0
+    now[0] = 225.0
+    controller._ticker.timeout.emit()
+    now[0] = 230.0
     controller._on_result(_SolveWorkerStub.result)
     controller._on_result(_SolveWorkerStub.result)
 
-    assert statuses[:2] == [
+    assert statuses[:3] == [
         "Initializing solver · 0:42 / ~2:00",
-        "Preparing BEAT CPU geometry caches · 1:35 / longer than usual",
+        "Preparing BEAT CPU geometry caches · 1:35 / ~2:00",
+        "Preparing BEAT CPU geometry caches · 2:05 / longer than usual",
     ]
-    assert history.durations_s(key) == [90.0, 100.0]
+    assert history.durations_s(key) == [90.0, 130.0]
 
 
 def test_warm_up_cancelled_before_first_result_is_not_recorded(qapp, tmp_path):
-    from blab.warm_up_history import WarmUpHistory, WarmUpKey
+    from blab.warm_up_history import WarmUpKey
 
     key = WarmUpKey("cpu", "0.4.0", "8", True)
     controller = SolveController()
@@ -247,7 +252,6 @@ def test_frequency_status_is_visible_in_activity_overlay(main_window):
     controller = main_window.solve_controller
     controller.clock = lambda: 0.0
     controller._begin_run(2)
-    controller._streaming = True
     controller._set_state(OperationPhase.RUNNING, "Solving...")
     controller._on_result(_SolveWorkerStub.result)
     expected = "Solving 1/2 · 0:00 elapsed"
@@ -286,7 +290,7 @@ def test_solve_worker_logs_and_emits_backend_status(monkeypatch, caplog) -> None
             self.request = request
 
         def warm_up_key(self):
-            return None
+            return WarmUpKey("cpu", "test", "1", True)
 
         def solve_stream(self, *, stop_requested=None):
             del stop_requested

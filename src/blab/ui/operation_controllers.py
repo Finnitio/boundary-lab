@@ -7,7 +7,7 @@ import time
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
 from blab.generators.base import GenerationCompleted, GenerationRequest
-from blab.solve_eta import SolveTimeEstimator, format_solve_status, format_warm_up_status
+from blab.solve_eta import SolveProgress, format_solve_status, format_warm_up_status
 from blab.ui.application_state import OperationPhase, OperationState, SolveCompletion
 from blab.ui.generator_worker import GeneratorWorker
 from blab.ui.system_solve import PreparedSystemSolve, SystemSolveWorker
@@ -124,19 +124,15 @@ class SolveController(QObject):
         self._thread: QThread | None = None
         self._worker: SystemSolveWorker | None = None
         self.clock = time.perf_counter
-        self._started_at: float | None = None
+        self.warm_up_history = WarmUpHistory()
+        self._progress: SolveProgress | None = None
         self._expected_count = 0
         self._solved_count = 0
-        self._estimator = SolveTimeEstimator(0)
         self._warm_up_message = ""
-        self.warm_up_history = WarmUpHistory()
-        self._warm_up_key: WarmUpKey | None = None
-        self._predicted_warm_up_s: float | None = None
         # Warm-up can pass long stretches without worker events, so elapsed time ticks on its own.
         self._ticker = QTimer(self)
         self._ticker.setInterval(1000)
         self._ticker.timeout.connect(self._show_warm_up)
-        self._streaming = False
         self._failed = False
         self._cancelled = False
         self.last_error: str | None = None
@@ -171,23 +167,18 @@ class SolveController(QObject):
     def _begin_run(self, expected_count: int) -> None:
         self._expected_count = expected_count
         self._solved_count = 0
-        self._estimator = SolveTimeEstimator(expected_count)
-        self._streaming = False
+        self._progress = SolveProgress(expected_count, clock=self.clock, history=self.warm_up_history)
         self._failed = False
         self._cancelled = False
         self.last_error = None
         self.last_completion = None
-        self._started_at = self.clock()
         self._warm_up_message = "Initializing solver"
-        self._warm_up_key = None
-        self._predicted_warm_up_s = None
         self._set_state(OperationPhase.RUNNING, self._warm_up_text())
         self._ticker.start()
 
     def _warm_up_text(self) -> str:
-        return format_warm_up_status(
-            self._warm_up_message, self.clock() - self._started_at, self._predicted_warm_up_s
-        )
+        progress = self._progress
+        return format_warm_up_status(self._warm_up_message, progress.elapsed_s(), progress.predicted_warm_up_s)
 
     @Slot()
     def _show_warm_up(self) -> None:
@@ -199,9 +190,8 @@ class SolveController(QObject):
 
     @Slot(object)
     def _on_warm_up_key(self, key: WarmUpKey) -> None:
-        self._warm_up_key = key
-        self._predicted_warm_up_s = self.warm_up_history.predict(key)
-        if self._solved_count == 0:
+        self._progress.start_warm_up(key)
+        if self._progress.warming_up:
             self._show_warm_up()
 
     def cancel(self) -> None:
@@ -222,13 +212,11 @@ class SolveController(QObject):
             return
         self._ticker.stop()
         self._solved_count += 1
-        now = self.clock()
-        self._estimator.record_result(now)
+        # Results arriving while cancelling neither count as a finished warm-up nor need an ETA.
         if self.state.phase == OperationPhase.RUNNING:
-            if self._solved_count == 1 and self._warm_up_key is not None:
-                self.warm_up_history.record(self._warm_up_key, now - self._started_at)
+            timing = self._progress.frequency_fields()
             message = format_solve_status(
-                self._solved_count, self._expected_count, now - self._started_at, self._estimator.remaining_s()
+                self._solved_count, self._expected_count, timing["elapsed_s"], timing["eta_s"]
             )
             self._set_state(OperationPhase.RUNNING, message)
             self.status.emit(message)
@@ -242,17 +230,16 @@ class SolveController(QObject):
 
     @Slot(object, object, object)
     def _on_initialized(self, angles, radiator_names, sphere_metadata) -> None:
-        self._streaming = True
         self._warm_up_message = "Solving..."
-        if self.state.phase == OperationPhase.RUNNING:
+        if self.state.phase == OperationPhase.RUNNING and self._progress.warming_up:
             self._set_state(OperationPhase.RUNNING, self._warm_up_text())
         self.initialized.emit(angles, radiator_names, sphere_metadata)
 
     @Slot(str)
     def _on_status(self, message: str) -> None:
-        # Backend detail remains in the worker's logs. Once streaming starts,
-        # retain the last completed frequency until the next result arrives.
-        if self._streaming or self.state.phase != OperationPhase.RUNNING:
+        # Backend detail remains in the worker's logs. Warm-up phases are shown;
+        # after the first result, the last completed frequency stays until the next.
+        if self._solved_count or self.state.phase != OperationPhase.RUNNING:
             return
         self._warm_up_message = message
         self._show_warm_up()
@@ -268,7 +255,7 @@ class SolveController(QObject):
     @Slot()
     def _on_finished(self) -> None:
         self._ticker.stop()
-        elapsed_s = 0.0 if self._started_at is None else self.clock() - self._started_at
+        elapsed_s = 0.0 if self._progress is None else self._progress.elapsed_s()
         if self._cancelled:
             phase = OperationPhase.CANCELLED
         elif self._failed:
@@ -285,7 +272,7 @@ class SolveController(QObject):
         self.last_completion = completion
         self._worker = None
         self._thread = None
-        self._started_at = None
+        self._progress = None
         self.finished.emit(completion)
 
     def _set_state(self, phase: OperationPhase, message: str) -> None:

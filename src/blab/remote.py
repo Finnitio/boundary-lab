@@ -129,7 +129,7 @@ class RemoteSession:
             available_quantity_ids=tuple(output.id for output in request.outputs),
         )
 
-    def warm_up_key(self):
+    def warm_up_key(self) -> WarmUpKey:
         # The server's engine, threads and worker state are not visible to the client.
         return WarmUpKey(backend="remote", engine_version="", julia_threads="", cold_worker=False)
 

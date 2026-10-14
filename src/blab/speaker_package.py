@@ -18,7 +18,7 @@ import numpy as np
 from blab.config import normalize_symmetry
 from blab.phasor import LEGACY_PHASOR_CONVENTION, SOLVER_PHASOR_CONVENTION, convert_phasor
 from blab.physical_model import AcousticRegionKind, PhysicalSolveKind
-from blab.solve_eta import HeadlessSolveProgress
+from blab.solve_eta import SolveProgress
 from blab.solve_results import (
     BEM_BOUNDARY_DOMAIN_ID,
     BEM_BOUNDARY_NEUMANN_ID,
@@ -348,7 +348,7 @@ def solve_speaker_package_system(
         julia_executable=julia_executable,
         julia_threads=julia_threads,
     )
-    progress = HeadlessSolveProgress(len(request.frequencies_hz))
+    progress = SolveProgress(len(request.frequencies_hz))
     session = backend.create_system_session(request)
     progress.start_warm_up(session.warm_up_key())
     emit({"event": "started", "frequency_count": len(request.frequencies_hz)})

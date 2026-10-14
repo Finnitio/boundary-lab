@@ -1,12 +1,14 @@
 import pytest
 
 from blab.solve_eta import (
+    SolveProgress,
     SolveTimeEstimator,
     format_elapsed,
     format_estimate,
     format_solve_status,
     format_warm_up_status,
 )
+from blab.warm_up_history import WarmUpHistory, WarmUpKey
 
 
 def test_warm_up_status_shows_phase_and_elapsed_time() -> None:
@@ -18,6 +20,31 @@ def test_warm_up_status_shows_phase_and_elapsed_time() -> None:
 def test_warm_up_status_shows_predicted_total_until_overrun() -> None:
     assert format_warm_up_status("Warming up", 42.0, 87.0) == "Warming up · 0:42 / ~1:00"
     assert format_warm_up_status("Warming up", 42.0, 40.0) == "Warming up · 0:42 / longer than usual"
+
+
+def test_warm_up_overrun_is_judged_against_the_displayed_prediction() -> None:
+    assert format_warm_up_status("Warming up", 60.0, 87.0) == "Warming up · 1:00 / ~1:00"
+    assert format_warm_up_status("Warming up", 61.0, 87.0) == "Warming up · 1:01 / longer than usual"
+    assert format_warm_up_status("Warming up", 95.0, 90.0) == "Warming up · 1:35 / ~2:00"
+
+
+def test_solve_progress_predicts_and_records_warm_up_and_reports_eta(tmp_path) -> None:
+    key = WarmUpKey("cpu", "0.4.0", "8", True)
+    history = WarmUpHistory(tmp_path / "history.json")
+    history.record(key, 90.0)
+    now = [100.0]
+    progress = SolveProgress(10, clock=lambda: now[0], history=history)
+    progress.start_warm_up(key)
+
+    now[0] = 120.0
+    assert progress.status_fields() == {"elapsed_s": 20.0, "predicted_warm_up_s": 90.0}
+    for arrival_s in (130.0, 140.0, 142.0, 146.0):
+        now[0] = arrival_s
+        fields = progress.frequency_fields()
+
+    assert fields == {"elapsed_s": 46.0, "eta_s": 18.0}
+    assert progress.status_fields() == {}  # Warm-up is over.
+    assert history.durations_s(key) == [90.0, 30.0]
 
 
 @pytest.mark.parametrize(("seconds", "text"), [(0.4, "0:00"), (65.9, "1:05"), (3725.0, "1:02:05")])

@@ -23,7 +23,7 @@ from blab.phasor import SOLVER_PHASOR_CONVENTION
 from blab.physical_model import PhysicalSolveKind, PhysicalSystem, physical_system_from_dict
 from blab.project.io import PROJECT_SCHEMA_VERSION, read_project_file
 from blab.project.model import ProjectPreferencesState, generator_documents_from_payload, generator_mesh_name
-from blab.solve_eta import HeadlessSolveProgress
+from blab.solve_eta import SolveProgress
 from blab.solve_results import (
     BEM_BOUNDARY_DOMAIN_ID,
     BEM_BOUNDARY_NEUMANN_ID,
@@ -563,7 +563,7 @@ def run_headless_solve(
         public_request=public_request,
     )
     solved_count = 0
-    progress = HeadlessSolveProgress(len(writer.frequencies))
+    progress = SolveProgress(len(writer.frequencies))
     emit(
         {
             "event": "started",

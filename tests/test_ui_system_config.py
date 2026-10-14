@@ -1590,7 +1590,9 @@ def test_coupled_worker_logs_and_emits_backend_status(monkeypatch, caplog) -> No
             pass
 
         def warm_up_key(self):
-            return None
+            from blab.warm_up_history import WarmUpKey
+
+            return WarmUpKey("cpu", "test", "1", True)
 
     class Backend:
         def __init__(self, **_kwargs):

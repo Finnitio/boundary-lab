@@ -424,8 +424,8 @@ def _export_speaker(args: argparse.Namespace) -> None:
         def emit(event: dict[str, Any]) -> None:
             if args.events == "ndjson":
                 print(json.dumps(event, separators=(",", ":")), flush=True)
-            elif event.get("event") == "frequency_completed":
-                print(format_solve_event(event), file=sys.stderr, flush=True)
+            elif (text := format_solve_event(event)) is not None:
+                print(text, file=sys.stderr, flush=True)
 
         solved = solve_speaker_package_system(
             prepared,
