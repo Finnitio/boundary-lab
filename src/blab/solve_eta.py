@@ -17,6 +17,10 @@ def format_estimate(seconds: float) -> str:
     return format_elapsed(max(step, math.floor(seconds / step + 0.5) * step))
 
 
+def format_warm_up_status(message: str, elapsed_s: float) -> str:
+    return f"{message} · {format_elapsed(elapsed_s)}"
+
+
 def format_solve_status(completed: int, total: int, elapsed_s: float, remaining_s: float | None) -> str:
     message = f"Solving {completed}/{total} · {format_elapsed(elapsed_s)} elapsed"
     if remaining_s is not None and completed < total:

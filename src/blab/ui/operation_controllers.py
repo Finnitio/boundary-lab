@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
 from blab.generators.base import GenerationCompleted, GenerationRequest
-from blab.solve_eta import SolveTimeEstimator, format_solve_status
+from blab.solve_eta import SolveTimeEstimator, format_solve_status, format_warm_up_status
 from blab.ui.application_state import OperationPhase, OperationState, SolveCompletion
 from blab.ui.generator_worker import GeneratorWorker
 from blab.ui.system_solve import PreparedSystemSolve, SystemSolveWorker
@@ -127,6 +127,11 @@ class SolveController(QObject):
         self._expected_count = 0
         self._solved_count = 0
         self._estimator = SolveTimeEstimator(0)
+        self._warm_up_message = ""
+        # Warm-up can pass long stretches without worker events, so elapsed time ticks on its own.
+        self._ticker = QTimer(self)
+        self._ticker.setInterval(1000)
+        self._ticker.timeout.connect(self._show_warm_up)
         self._streaming = False
         self._failed = False
         self._cancelled = False
@@ -141,7 +146,6 @@ class SolveController(QObject):
         if self.active:
             return False
         self._begin_run(len(request.request.frequencies_hz))
-        self._set_state(OperationPhase.RUNNING, "Initializing solver")
         thread = QThread(self)
         worker = SystemSolveWorker(request)
         self._thread = thread
@@ -169,10 +173,22 @@ class SolveController(QObject):
         self.last_error = None
         self.last_completion = None
         self._started_at = self.clock()
+        self._warm_up_message = "Initializing solver"
+        self._set_state(OperationPhase.RUNNING, format_warm_up_status(self._warm_up_message, 0.0))
+        self._ticker.start()
+
+    @Slot()
+    def _show_warm_up(self) -> None:
+        if self.state.phase != OperationPhase.RUNNING:
+            return
+        message = format_warm_up_status(self._warm_up_message, self.clock() - self._started_at)
+        self._set_state(OperationPhase.RUNNING, message)
+        self.status.emit(message)
 
     def cancel(self) -> None:
         if not self.active:
             return
+        self._ticker.stop()
         self._cancelled = True
         self._set_state(OperationPhase.CANCELLING, "Stopping solve")
         if self._worker is not None:
@@ -185,6 +201,7 @@ class SolveController(QObject):
         self.result_ready.emit(result)
         if self._failed:
             return
+        self._ticker.stop()
         self._solved_count += 1
         now = self.clock()
         self._estimator.record_result(now)
@@ -205,8 +222,11 @@ class SolveController(QObject):
     @Slot(object, object, object)
     def _on_initialized(self, angles, radiator_names, sphere_metadata) -> None:
         self._streaming = True
+        self._warm_up_message = "Solving..."
         if self.state.phase == OperationPhase.RUNNING:
-            self._set_state(OperationPhase.RUNNING, "Solving...")
+            self._set_state(
+                OperationPhase.RUNNING, format_warm_up_status(self._warm_up_message, self.clock() - self._started_at)
+            )
         self.initialized.emit(angles, radiator_names, sphere_metadata)
 
     @Slot(str)
@@ -215,11 +235,12 @@ class SolveController(QObject):
         # retain the last completed frequency until the next result arrives.
         if self._streaming or self.state.phase != OperationPhase.RUNNING:
             return
-        self._set_state(self.state.phase, message)
-        self.status.emit(message)
+        self._warm_up_message = message
+        self._show_warm_up()
 
     @Slot(str, str)
     def _on_failed(self, message: str, details: str = "") -> None:
+        self._ticker.stop()
         self._failed = True
         self.last_error = message
         self._set_state(OperationPhase.FAILED, message)
@@ -227,6 +248,7 @@ class SolveController(QObject):
 
     @Slot()
     def _on_finished(self) -> None:
+        self._ticker.stop()
         elapsed_s = 0.0 if self._started_at is None else self.clock() - self._started_at
         if self._cancelled:
             phase = OperationPhase.CANCELLED

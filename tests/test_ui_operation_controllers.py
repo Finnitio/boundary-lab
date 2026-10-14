@@ -90,7 +90,7 @@ def test_solve_controller_owns_worker_thread_and_completion_state(qapp, monkeypa
     assert started is True
     assert results == [_SolveWorkerStub.result]
     assert statuses == [
-        "Preparing backend",
+        "Preparing backend · 0:00",
         "Solving 1/1 · 0:00 elapsed",
     ]
     assert completions[0].phase == OperationPhase.COMPLETED
@@ -111,13 +111,13 @@ def test_streaming_status_updates_only_for_completed_frequencies(qapp):
     controller._on_status("Loading backend")
     controller._on_initialized(np.array([0.0]), np.array(["driver"]), None)
     controller._on_status("Assembling first frequency")
-    assert controller.state.message == "Solving..."
+    assert controller.state.message == "Solving... · 0:00"
     controller._on_result(_SolveWorkerStub.result)
     expected = "Solving 1/2 · 0:00 elapsed"
     assert controller.state.message == expected
     controller._on_status("Computing field for next frequency")
     assert controller.state.message == expected
-    assert statuses == ["Loading backend", expected]
+    assert statuses == ["Loading backend · 0:00", expected]
     controller._on_result(
         SystemFrequencyResult(
             freq_hz=2000.0, quantities=(), excitation_port_ids=(), diagnostics=_SolveWorkerStub.result.diagnostics
@@ -141,7 +141,6 @@ def test_streaming_status_shows_elapsed_and_remaining_time(qapp):
     controller.clock = lambda: now[0]
     controller._worker = _SolveWorkerStub()
     controller._begin_run(10)
-    controller._set_state(OperationPhase.RUNNING, "Solving...")
     statuses = []
     controller.status.connect(statuses.append)
     for arrival_s in (130.0, 140.0, 142.0, 146.0):
@@ -157,6 +156,46 @@ def test_streaming_status_shows_elapsed_and_remaining_time(qapp):
     controller.cancel()
     controller._on_finished()
     assert controller.state.message == "Solve finished"
+
+
+def test_warm_up_status_ticks_elapsed_time_until_first_result(qapp):
+    now = [100.0]
+    controller = SolveController()
+    controller.clock = lambda: now[0]
+    controller._begin_run(10)
+    assert controller.state.message == "Initializing solver · 0:00"
+    assert controller._ticker.isActive() and controller._ticker.interval() == 1000
+    statuses = []
+    controller.status.connect(statuses.append)
+
+    now[0] = 142.0
+    controller._on_status("Preparing BEAT CPU geometry caches")
+    now[0] = 150.0
+    controller._ticker.timeout.emit()
+    now[0] = 160.0
+    controller._on_result(_SolveWorkerStub.result)
+
+    assert statuses == [
+        "Preparing BEAT CPU geometry caches · 0:42",
+        "Preparing BEAT CPU geometry caches · 0:50",
+        "Solving 1/10 · 1:00 elapsed",
+    ]
+    assert not controller._ticker.isActive()
+
+
+def test_warm_up_ticking_stops_on_cancel_and_failure(qapp):
+    controller = SolveController()
+    controller._begin_run(10)
+    controller.cancel()
+    assert not controller._ticker.isActive()
+
+    controller._begin_run(10)
+    controller._on_failed("Backend failed")
+    assert not controller._ticker.isActive()
+
+    controller._begin_run(10)
+    controller._on_finished()
+    assert not controller._ticker.isActive()
 
 
 def test_frequency_status_is_visible_in_activity_overlay(main_window):

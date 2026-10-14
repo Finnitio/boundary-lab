@@ -1,6 +1,18 @@
 import pytest
 
-from blab.solve_eta import SolveTimeEstimator, format_elapsed, format_estimate, format_solve_status
+from blab.solve_eta import (
+    SolveTimeEstimator,
+    format_elapsed,
+    format_estimate,
+    format_solve_status,
+    format_warm_up_status,
+)
+
+
+def test_warm_up_status_shows_phase_and_elapsed_time() -> None:
+    assert format_warm_up_status("Preparing BEAT CPU geometry caches", 42.7) == (
+        "Preparing BEAT CPU geometry caches · 0:42"
+    )
 
 
 @pytest.mark.parametrize(("seconds", "text"), [(0.4, "0:00"), (65.9, "1:05"), (3725.0, "1:02:05")])
