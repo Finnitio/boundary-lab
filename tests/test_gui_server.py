@@ -78,7 +78,7 @@ def test_gui_remote_worker_streams_complex_results(qapp, monkeypatch):
                     "timings": {"assembly_s": 1.2, "solve_s": 0.3, "field_s": 0.4},
                 },
             )
-            return SimpleNamespace(solve_stream=lambda **kwargs: iter([result]))
+            return SimpleNamespace(solve_stream=lambda **kwargs: iter([result]), warm_up_key=lambda: None)
 
     monkeypatch.setattr("blab.remote.RemoteBackend", Backend)
     worker = SystemSolveWorker(prepared)

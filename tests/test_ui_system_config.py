@@ -1589,6 +1589,9 @@ def test_coupled_worker_logs_and_emits_backend_status(monkeypatch, caplog) -> No
         def stop(self) -> None:
             pass
 
+        def warm_up_key(self):
+            return None
+
     class Backend:
         def __init__(self, **_kwargs):
             pass

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import math
+import time
+
+from blab.warm_up_history import WarmUpHistory, WarmUpKey
 
 
 def format_elapsed(seconds: float) -> str:
@@ -53,3 +56,32 @@ class SolveTimeEstimator:
         if len(solve_times_s) < 2:
             return None
         return sum(solve_times_s) / len(solve_times_s) * max(self.total - self.completed, 0)
+
+
+class HeadlessSolveProgress:
+    """Timing fields for headless solve events, recording the warm-up like the GUI does."""
+
+    def __init__(self, total: int):
+        self._started_at = time.perf_counter()
+        self._estimator = SolveTimeEstimator(total)
+        self._history = WarmUpHistory()
+        self._warm_up_key: WarmUpKey | None = None
+        self._predicted_warm_up_s: float | None = None
+
+    def start_warm_up(self, key: WarmUpKey) -> None:
+        self._warm_up_key = key
+        self._predicted_warm_up_s = self._history.predict(key)
+
+    def status_fields(self) -> dict[str, float | None]:
+        warming_up = self._estimator.completed == 0
+        return {
+            "elapsed_s": time.perf_counter() - self._started_at,
+            "predicted_warm_up_s": self._predicted_warm_up_s if warming_up else None,
+        }
+
+    def frequency_fields(self) -> dict[str, float | None]:
+        now = time.perf_counter()
+        self._estimator.record_result(now)
+        if self._estimator.completed == 1 and self._warm_up_key is not None:
+            self._history.record(self._warm_up_key, now - self._started_at)
+        return {"elapsed_s": now - self._started_at, "eta_s": self._estimator.remaining_s()}
