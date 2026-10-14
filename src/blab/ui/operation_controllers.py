@@ -7,9 +7,9 @@ import time
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from blab.generators.base import GenerationCompleted, GenerationRequest
+from blab.solve_eta import SolveTimeEstimator, format_solve_status
 from blab.ui.application_state import OperationPhase, OperationState, SolveCompletion
 from blab.ui.generator_worker import GeneratorWorker
-from blab.ui.solve_progress import format_frequency_completion
 from blab.ui.system_solve import PreparedSystemSolve, SystemSolveWorker
 
 
@@ -122,9 +122,11 @@ class SolveController(QObject):
         self.state = OperationState()
         self._thread: QThread | None = None
         self._worker: SystemSolveWorker | None = None
+        self.clock = time.perf_counter
         self._started_at: float | None = None
         self._expected_count = 0
         self._solved_count = 0
+        self._estimator = SolveTimeEstimator(0)
         self._streaming = False
         self._failed = False
         self._cancelled = False
@@ -138,14 +140,7 @@ class SolveController(QObject):
     def start(self, request: PreparedSystemSolve) -> bool:
         if self.active:
             return False
-        self._expected_count = len(request.request.frequencies_hz)
-        self._solved_count = 0
-        self._streaming = False
-        self._failed = False
-        self._cancelled = False
-        self.last_error = None
-        self.last_completion = None
-        self._started_at = time.perf_counter()
+        self._begin_run(len(request.request.frequencies_hz))
         self._set_state(OperationPhase.RUNNING, "Initializing solver")
         thread = QThread(self)
         worker = SystemSolveWorker(request)
@@ -164,6 +159,17 @@ class SolveController(QObject):
         thread.start()
         return True
 
+    def _begin_run(self, expected_count: int) -> None:
+        self._expected_count = expected_count
+        self._solved_count = 0
+        self._estimator = SolveTimeEstimator(expected_count)
+        self._streaming = False
+        self._failed = False
+        self._cancelled = False
+        self.last_error = None
+        self.last_completion = None
+        self._started_at = self.clock()
+
     def cancel(self) -> None:
         if not self.active:
             return
@@ -180,8 +186,12 @@ class SolveController(QObject):
         if self._failed:
             return
         self._solved_count += 1
+        now = self.clock()
+        self._estimator.record_result(now)
         if self.state.phase == OperationPhase.RUNNING:
-            message = format_frequency_completion(result, self._solved_count, self._expected_count)
+            message = format_solve_status(
+                self._solved_count, self._expected_count, now - self._started_at, self._estimator.remaining_s()
+            )
             self._set_state(OperationPhase.RUNNING, message)
             self.status.emit(message)
 
@@ -217,7 +227,7 @@ class SolveController(QObject):
 
     @Slot()
     def _on_finished(self) -> None:
-        elapsed_s = 0.0 if self._started_at is None else time.perf_counter() - self._started_at
+        elapsed_s = 0.0 if self._started_at is None else self.clock() - self._started_at
         if self._cancelled:
             phase = OperationPhase.CANCELLED
         elif self._failed:

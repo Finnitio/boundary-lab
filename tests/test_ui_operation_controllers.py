@@ -44,7 +44,7 @@ def test_rejected_projection_stops_worker_and_cannot_complete_successfully(qapp)
     controller = SolveController()
     worker = _SolveWorkerStub()
     controller._worker = worker
-    controller._expected_count = 1
+    controller._begin_run(1)
     controller._set_state(OperationPhase.RUNNING, "Solving")
     stopped_at_notification = []
     controller.failed.connect(lambda _message: stopped_at_notification.append(worker.stopped))
@@ -91,7 +91,7 @@ def test_solve_controller_owns_worker_thread_and_completion_state(qapp, monkeypa
     assert results == [_SolveWorkerStub.result]
     assert statuses == [
         "Preparing backend",
-        "Solved 1/1 (1000.0 Hz) | Assembly 1.20s | Solve 0.30s | Field 0.04s",
+        "Solving 1/1 · 0:00 elapsed",
     ]
     assert completions[0].phase == OperationPhase.COMPLETED
     assert completions[0].completed is True
@@ -103,7 +103,8 @@ def test_solve_controller_owns_worker_thread_and_completion_state(qapp, monkeypa
 
 def test_streaming_status_updates_only_for_completed_frequencies(qapp):
     controller = SolveController()
-    controller._expected_count = 2
+    controller.clock = lambda: 0.0
+    controller._begin_run(2)
     controller._set_state(OperationPhase.RUNNING, "Initializing solver")
     statuses = []
     controller.status.connect(statuses.append)
@@ -112,7 +113,7 @@ def test_streaming_status_updates_only_for_completed_frequencies(qapp):
     controller._on_status("Assembling first frequency")
     assert controller.state.message == "Solving..."
     controller._on_result(_SolveWorkerStub.result)
-    expected = "Solved 1/2 (1000.0 Hz) | Assembly 1.20s | Solve 0.30s | Field 0.04s"
+    expected = "Solving 1/2 · 0:00 elapsed"
     assert controller.state.message == expected
     controller._on_status("Computing field for next frequency")
     assert controller.state.message == expected
@@ -122,7 +123,7 @@ def test_streaming_status_updates_only_for_completed_frequencies(qapp):
             freq_hz=2000.0, quantities=(), excitation_port_ids=(), diagnostics=_SolveWorkerStub.result.diagnostics
         )
     )
-    assert controller.state.message.startswith("Solved 2/2 (2000.0 Hz)")
+    assert controller.state.message == "Solving 2/2 · 0:00 elapsed"
     controller.cancel()
     controller._on_status("Backend still stopping")
     controller._on_result(_SolveWorkerStub.result)
@@ -134,13 +135,38 @@ def test_streaming_status_updates_only_for_completed_frequencies(qapp):
     assert controller.state.message == "Backend failed"
 
 
+def test_streaming_status_shows_elapsed_and_remaining_time(qapp):
+    now = [100.0]
+    controller = SolveController()
+    controller.clock = lambda: now[0]
+    controller._worker = _SolveWorkerStub()
+    controller._begin_run(10)
+    controller._set_state(OperationPhase.RUNNING, "Solving...")
+    statuses = []
+    controller.status.connect(statuses.append)
+    for arrival_s in (130.0, 140.0, 142.0, 146.0):
+        now[0] = arrival_s
+        controller._on_result(_SolveWorkerStub.result)
+
+    assert statuses == [
+        "Solving 1/10 · 0:30 elapsed",
+        "Solving 2/10 · 0:40 elapsed",
+        "Solving 3/10 · 0:42 elapsed",
+        "Solving 4/10 · 0:46 elapsed · ~0:20 left",
+    ]
+    controller.cancel()
+    controller._on_finished()
+    assert controller.state.message == "Solve finished"
+
+
 def test_frequency_status_is_visible_in_activity_overlay(main_window):
     controller = main_window.solve_controller
-    controller._expected_count = 2
+    controller.clock = lambda: 0.0
+    controller._begin_run(2)
     controller._streaming = True
     controller._set_state(OperationPhase.RUNNING, "Solving...")
     controller._on_result(_SolveWorkerStub.result)
-    expected = "Solved 1/2 (1000.0 Hz) | Assembly 1.20s | Solve 0.30s | Field 0.04s"
+    expected = "Solving 1/2 · 0:00 elapsed"
     assert main_window.activities.message == expected
     assert main_window.activity_status.activity_label.text() == expected
     assert main_window.status_label.text() == expected
