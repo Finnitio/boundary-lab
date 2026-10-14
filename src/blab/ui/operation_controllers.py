@@ -11,6 +11,7 @@ from blab.solve_eta import SolveTimeEstimator, format_solve_status, format_warm_
 from blab.ui.application_state import OperationPhase, OperationState, SolveCompletion
 from blab.ui.generator_worker import GeneratorWorker
 from blab.ui.system_solve import PreparedSystemSolve, SystemSolveWorker
+from blab.warm_up_history import WarmUpHistory, WarmUpKey
 
 
 class GeometryController(QObject):
@@ -128,6 +129,9 @@ class SolveController(QObject):
         self._solved_count = 0
         self._estimator = SolveTimeEstimator(0)
         self._warm_up_message = ""
+        self.warm_up_history = WarmUpHistory()
+        self._warm_up_key: WarmUpKey | None = None
+        self._predicted_warm_up_s: float | None = None
         # Warm-up can pass long stretches without worker events, so elapsed time ticks on its own.
         self._ticker = QTimer(self)
         self._ticker.setInterval(1000)
@@ -155,6 +159,7 @@ class SolveController(QObject):
         worker.initialized.connect(self._on_initialized)
         worker.result_ready.connect(self._on_result)
         worker.status.connect(self._on_status)
+        worker.warm_up_key.connect(self._on_warm_up_key)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
@@ -174,16 +179,30 @@ class SolveController(QObject):
         self.last_completion = None
         self._started_at = self.clock()
         self._warm_up_message = "Initializing solver"
-        self._set_state(OperationPhase.RUNNING, format_warm_up_status(self._warm_up_message, 0.0))
+        self._warm_up_key = None
+        self._predicted_warm_up_s = None
+        self._set_state(OperationPhase.RUNNING, self._warm_up_text())
         self._ticker.start()
+
+    def _warm_up_text(self) -> str:
+        return format_warm_up_status(
+            self._warm_up_message, self.clock() - self._started_at, self._predicted_warm_up_s
+        )
 
     @Slot()
     def _show_warm_up(self) -> None:
         if self.state.phase != OperationPhase.RUNNING:
             return
-        message = format_warm_up_status(self._warm_up_message, self.clock() - self._started_at)
+        message = self._warm_up_text()
         self._set_state(OperationPhase.RUNNING, message)
         self.status.emit(message)
+
+    @Slot(object)
+    def _on_warm_up_key(self, key: WarmUpKey) -> None:
+        self._warm_up_key = key
+        self._predicted_warm_up_s = self.warm_up_history.predict(key)
+        if self._solved_count == 0:
+            self._show_warm_up()
 
     def cancel(self) -> None:
         if not self.active:
@@ -206,6 +225,8 @@ class SolveController(QObject):
         now = self.clock()
         self._estimator.record_result(now)
         if self.state.phase == OperationPhase.RUNNING:
+            if self._solved_count == 1 and self._warm_up_key is not None:
+                self.warm_up_history.record(self._warm_up_key, now - self._started_at)
             message = format_solve_status(
                 self._solved_count, self._expected_count, now - self._started_at, self._estimator.remaining_s()
             )
@@ -224,9 +245,7 @@ class SolveController(QObject):
         self._streaming = True
         self._warm_up_message = "Solving..."
         if self.state.phase == OperationPhase.RUNNING:
-            self._set_state(
-                OperationPhase.RUNNING, format_warm_up_status(self._warm_up_message, self.clock() - self._started_at)
-            )
+            self._set_state(OperationPhase.RUNNING, self._warm_up_text())
         self.initialized.emit(angles, radiator_names, sphere_metadata)
 
     @Slot(str)

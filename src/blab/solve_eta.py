@@ -17,8 +17,13 @@ def format_estimate(seconds: float) -> str:
     return format_elapsed(max(step, math.floor(seconds / step + 0.5) * step))
 
 
-def format_warm_up_status(message: str, elapsed_s: float) -> str:
-    return f"{message} · {format_elapsed(elapsed_s)}"
+def format_warm_up_status(message: str, elapsed_s: float, predicted_s: float | None = None) -> str:
+    text = f"{message} · {format_elapsed(elapsed_s)}"
+    if predicted_s is None:
+        return text
+    if elapsed_s > predicted_s:
+        return f"{text} / longer than usual"
+    return f"{text} / ~{format_estimate(predicted_s)}"
 
 
 def format_solve_status(completed: int, total: int, elapsed_s: float, remaining_s: float | None) -> str:

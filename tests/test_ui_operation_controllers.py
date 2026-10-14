@@ -21,6 +21,7 @@ class _SolveWorkerStub(QObject):
     initialized = Signal(object, object, object)
     result_ready = Signal(object)
     status = Signal(str)
+    warm_up_key = Signal(object)
     failed = Signal(str)
     finished = Signal()
 
@@ -183,6 +184,50 @@ def test_warm_up_status_ticks_elapsed_time_until_first_result(qapp):
     assert not controller._ticker.isActive()
 
 
+def test_warm_up_shows_prediction_and_records_duration_at_first_result(qapp, tmp_path):
+    from blab.warm_up_history import WarmUpHistory, WarmUpKey
+
+    key = WarmUpKey("cpu", "0.4.0", "8", True)
+    history = WarmUpHistory(tmp_path / "history.json")
+    history.record(key, 90.0)
+    now = [100.0]
+    controller = SolveController()
+    controller.clock = lambda: now[0]
+    controller.warm_up_history = history
+    controller._begin_run(10)
+    statuses = []
+    controller.status.connect(statuses.append)
+
+    now[0] = 142.0
+    controller._on_warm_up_key(key)
+    now[0] = 195.0
+    controller._on_status("Preparing BEAT CPU geometry caches")
+    now[0] = 160.0 + 40.0
+    controller._on_result(_SolveWorkerStub.result)
+    controller._on_result(_SolveWorkerStub.result)
+
+    assert statuses[:2] == [
+        "Initializing solver · 0:42 / ~2:00",
+        "Preparing BEAT CPU geometry caches · 1:35 / longer than usual",
+    ]
+    assert history.durations_s(key) == [90.0, 100.0]
+
+
+def test_warm_up_cancelled_before_first_result_is_not_recorded(qapp, tmp_path):
+    from blab.warm_up_history import WarmUpHistory, WarmUpKey
+
+    key = WarmUpKey("cpu", "0.4.0", "8", True)
+    controller = SolveController()
+    controller.warm_up_history = WarmUpHistory(tmp_path / "history.json")
+    controller._begin_run(10)
+    controller._on_warm_up_key(key)
+    controller.cancel()
+    controller._on_result(_SolveWorkerStub.result)
+    controller._on_finished()
+
+    assert controller.warm_up_history.durations_s(key) == []
+
+
 def test_warm_up_ticking_stops_on_cancel_and_failure(qapp):
     controller = SolveController()
     controller._begin_run(10)
@@ -239,6 +284,9 @@ def test_solve_worker_logs_and_emits_backend_status(monkeypatch, caplog) -> None
 
         def __init__(self, request):
             self.request = request
+
+        def warm_up_key(self):
+            return None
 
         def solve_stream(self, *, stop_requested=None):
             del stop_requested

@@ -15,6 +15,11 @@ def test_warm_up_status_shows_phase_and_elapsed_time() -> None:
     )
 
 
+def test_warm_up_status_shows_predicted_total_until_overrun() -> None:
+    assert format_warm_up_status("Warming up", 42.0, 87.0) == "Warming up · 0:42 / ~1:00"
+    assert format_warm_up_status("Warming up", 42.0, 40.0) == "Warming up · 0:42 / longer than usual"
+
+
 @pytest.mark.parametrize(("seconds", "text"), [(0.4, "0:00"), (65.9, "1:05"), (3725.0, "1:02:05")])
 def test_elapsed_time_is_clock_style(seconds: float, text: str) -> None:
     assert format_elapsed(seconds) == text
