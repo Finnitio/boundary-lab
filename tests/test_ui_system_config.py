@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import meshio
 import numpy as np
 import pytest
-from PySide6.QtCore import QLocale
+from PySide6.QtCore import QLocale, Qt
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QComboBox, QPushButton
 
@@ -1137,6 +1137,9 @@ def test_failed_interface_stays_visible_and_can_be_retried(monkeypatch) -> None:
     assert "Interior / Interface" in details
     assert "Exterior / Interface" in details
     assert "0.002 exceeds tolerance 0.0005" in details
+    assert "Source-surface measurements" in details
+    assert "Maximum sampled perimeter deviation:" in details
+    assert dialog.interface_details.isHidden()
     assert dialog.physical_system().interfaces == ()
     assert len(warnings) == 1
     assert dialog.identify_interfaces_button.isEnabled()
@@ -1172,7 +1175,61 @@ def test_interface_discovery_continues_after_failed_interior(monkeypatch) -> Non
     assert [dialog.interfaces_table.item(r, 3).text() for r in range(2)] == ["Ready", "Failed"]
     assert dialog.interfaces_table.currentRow() == 1
     assert "Perimeter mismatch" in dialog.interface_details.toPlainText()
+    assert "Source measurements unavailable:" in dialog.interface_details.toPlainText()
     assert [p.bounded_boundary_id for p in dialog._interfaces] == [fem.id]
+
+
+def test_interface_measurements_use_resource_translation(monkeypatch) -> None:
+    dialog = _configured_fixture_dialog()
+    measured = []
+    original_measure = system_config_module.measure_interface_geometry
+
+    def measure(*args, **kwargs):
+        result = original_measure(*args, **kwargs)
+        measured.append(result)
+        return result
+
+    monkeypatch.setattr(system_config_module, "measure_interface_geometry", measure)
+    dialog._show_interface_details()
+    original_geometry = measured[-1]
+    regions, resources = dialog._collect_regions_and_resources()
+    offset = original_geometry.fem.plane_normal * 0.003
+    resources = tuple(
+        replace(resource, translation_m=tuple(offset)) if resource.id == "mesh:exterior" else resource
+        for resource in resources
+    )
+    monkeypatch.setattr(dialog, "_collect_regions_and_resources", lambda: (regions, resources))
+    dialog._show_interface_details()
+    geometry = measured[-1]
+    assert geometry.centroid_normal_offset_m == pytest.approx(0.003, abs=1e-12)
+    np.testing.assert_allclose(geometry.bem.points, original_geometry.bem.points + offset)
+    assert "Centroid offset along FEM fitted normal: 3 mm" in dialog.interface_details.toPlainText()
+
+
+def test_interface_details_collapse_preserves_measurements_and_selection_updates() -> None:
+    dialog = _configured_fixture_dialog()
+    toggle = dialog.interface_details_toggle
+    assert not toggle.isChecked()
+    assert dialog.interface_details.isHidden()
+    assert toggle.arrowType() == Qt.ArrowType.RightArrow
+    assert not any(button.text() == "Show pair in 3D" for button in dialog.findChildren(QPushButton))
+
+    toggle.click()
+    assert not dialog.interface_details.isHidden()
+    assert toggle.arrowType() == Qt.ArrowType.DownArrow
+    assert "Source-surface measurements" in dialog.interface_details.toPlainText()
+    dialog._load_interfaces()
+    assert toggle.isChecked()
+    assert not dialog.interface_details.isHidden()
+
+    toggle.click()
+    assert dialog.interface_details.isHidden()
+    assert toggle.arrowType() == Qt.ArrowType.RightArrow
+    dialog.stitch_exterior_meshes_check.setChecked(True)
+    assert dialog.interface_details.isHidden()
+    toggle.click()
+    assert "Needs recheck" in dialog.interface_details.toPlainText()
+    assert "Source-surface measurements" in dialog.interface_details.toPlainText()
 
 
 def test_interface_settings_changes_mark_existing_pair_stale() -> None:
