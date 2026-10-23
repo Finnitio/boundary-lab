@@ -31,7 +31,7 @@ from blab.project.model import (
     new_generator_document,
 )
 from blab.system_solve import prepare_system_solve
-from cad_fixtures import bored_ball, strip_names, vented_box, waveguide
+from cad_fixtures import bored_ball, multipart_port, single_solid, strip_names, vented_box, waveguide
 
 ROOT = Path(__file__).resolve().parents[1] / "geometry_providers"
 PROVIDER = "blab.cad_import"
@@ -78,6 +78,23 @@ def generate(backend, project, output):
     return stage_generation(project, {}, complete_generation(request, response)), response
 
 
+@pytest.mark.parametrize("shape", ["box", "sphere"])
+def test_a_standalone_solid_stages_one_bounded_region_and_rigid_walls(plugin, tmp_path, shape):
+    catalog, backend = plugin
+    step = single_solid(tmp_path / "air.step", shape)
+
+    project, response = generate(backend, make_project(catalog, step), tmp_path / "out")
+
+    system = project.physical_system
+    (region,) = system.regions
+    (boundary,) = system.boundaries
+    assert region.kind == "bounded_air" and [g.name for g in region.volume_groups] == ["Air"]
+    assert boundary.kind == "rigid" and boundary.group.name == "walls"
+    assert boundary.group.mesh_id == region.volume_groups[0].mesh_id
+    assert system.interfaces == ()
+    assert len(response.geometry.meshes) == 1
+
+
 def test_vented_box_stages_regions_walls_and_interface_and_prepares_a_coupled_solve(plugin, box_step, tmp_path):
     catalog, backend = plugin
     project, _ = generate(backend, make_project(catalog, box_step), tmp_path)
@@ -106,6 +123,18 @@ def test_vented_box_stages_regions_walls_and_interface_and_prepares_a_coupled_so
         polar_angle_step_deg=90,
     )
     assert prepared.solve_kind == "coupled_bem_fem"
+
+
+def test_multipart_port_stages_and_compiles_every_mouth_interface(plugin, tmp_path):
+    catalog, backend = plugin
+    step = multipart_port(tmp_path / "multipart.step")
+    project, response = generate(backend, make_project(catalog, step), tmp_path / "out")
+    system = project.physical_system
+    bounded = next(r for r in system.regions if r.kind == "bounded_air")
+    assert {g.name for g in bounded.volume_groups} == {"Chamber", "Annulus", "Core"}
+    assert len(system.interfaces) == 2
+    assert len(PhysicalSystemCompiler().compile(system).interfaces) == 2
+    assert not any("open edge" in warning for warning in response.geometry.provider_metadata["warnings"])
 
 
 def test_closed_shell_guessed_air_stages_a_bounded_region(plugin, tmp_path):

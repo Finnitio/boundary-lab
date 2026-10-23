@@ -134,6 +134,21 @@ def _name_faces(text, face_names):
 CAD_ROTATIONS = {("+Z", "+Y"): None, ("-Y", "+Z"): (1, 0, 0, math.pi / 2)}
 
 
+def single_solid(path: Path, shape: str) -> Path:
+    """A standalone air body: a 100×80×60 mm box or a sphere of radius 30 mm."""
+
+    def build():
+        occ = gmsh.model.occ
+        tag = occ.addBox(0, 0, 0, 100, 80, 60) if shape == "box" else occ.addSphere(0, 0, 0, 30)
+        return [(3, tag)], ["Air"]
+
+    write_step(path, build)
+    # A single shape is exported as the root product, without an assembly wrapper.
+    text = re.sub(r"PRODUCT\('[^']*',\s*'[^']*'", "PRODUCT('Air','Air'", path.read_text(encoding="utf-8"))
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
 def vented_box(
     path: Path,
     *,
@@ -179,6 +194,26 @@ def vented_box(
         return "Driver" if abs(centre[2] + 20 + depth) < 1e-6 else None
 
     return write_step(path, build, face_names=face_names or default_names)
+
+
+def multipart_port(path: Path, *, gap: bool = False, overlap: bool = False) -> Path:
+    """A cabinet opening filled by touching annular and core air bodies."""
+
+    def build():
+        occ = gmsh.model.occ
+        chamber = [(3, occ.addBox(-50, -50, -200, 100, 100, 180))]
+        outer = occ.addCylinder(0, 0, -20, 0, 0, 20, 10)
+        bore = occ.addCylinder(0, 0, -20, 0, 0, 20, 5)
+        annulus = occ.cut([(3, outer)], [(3, bore)])[0]
+        core = [] if gap else [(3, occ.addCylinder(0, 0, -20, 0, 0, 20, 5))]
+        cabinet = _cabinet(60, 60, 210, [(0, 0, 10)])
+        if overlap:
+            # A sheet branching from the cabinet's rear edge makes that edge non-manifold.
+            cabinet.append((2, occ.addRectangle(-60, -180, -210, 120, 120)))
+        names = ["Chamber", "Annulus"] + ["Core"] * len(core) + ["Cabinet"] * len(cabinet)
+        return chamber + annulus + core + cabinet, names
+
+    return write_step(path, build)
 
 
 def named_sides(centre):
