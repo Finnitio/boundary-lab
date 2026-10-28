@@ -231,6 +231,157 @@ def test_side_drop_equalises_three_members_in_the_affected_row(qapp) -> None:
     workspace.deleteLater()
 
 
+def test_dragging_panel_out_of_row_equalises_remaining_members(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    first = QDockWidget("First", workspace)
+    first.setObjectName("first")
+    first.setWidget(QWidget())
+    second = QDockWidget("Second", workspace)
+    second.setObjectName("second")
+    second.setWidget(QWidget())
+    moved = QDockWidget("Moved", workspace)
+    moved.setObjectName("moved")
+    moved.setWidget(QWidget())
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, first)
+    workspace.splitDockWidget(first, second, Qt.Horizontal)
+    workspace.splitDockWidget(second, moved, Qt.Horizontal)
+    controller = PanelDockController(workspace)
+    for panel in (first, second, moved):
+        controller.register_panel(panel)
+    workspace.show()
+    qapp.processEvents()
+    workspace.resizeDocks([first, second, moved], [500, 275, 125], Qt.Horizontal)
+    qapp.processEvents()
+
+    controller.drop_panel(moved, Edge.BOTTOM)
+    qapp.processEvents()
+
+    assert abs(first.width() - second.width()) <= 2
+
+    workspace.close()
+    workspace.deleteLater()
+
+
+def test_floating_panel_out_of_row_equalises_remaining_members(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    first = QDockWidget("First", workspace)
+    first.setObjectName("first")
+    first.setWidget(QWidget())
+    second = QDockWidget("Second", workspace)
+    second.setObjectName("second")
+    second.setWidget(QWidget())
+    moved = QDockWidget("Moved", workspace)
+    moved.setObjectName("moved")
+    moved.setWidget(QWidget())
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, first)
+    workspace.splitDockWidget(first, second, Qt.Horizontal)
+    workspace.splitDockWidget(second, moved, Qt.Horizontal)
+    controller = PanelDockController(workspace)
+    for panel in (first, second, moved):
+        controller.register_panel(panel)
+    workspace.show()
+    qapp.processEvents()
+    workspace.resizeDocks([first, second, moved], [500, 275, 125], Qt.Horizontal)
+    qapp.processEvents()
+
+    controller.finish_drag(moved, workspace.mapToGlobal(QPoint(-100, -100)), None)
+    qapp.processEvents()
+
+    assert moved.isFloating()
+    assert abs(first.width() - second.width()) <= 2
+
+    workspace.close()
+    workspace.deleteLater()
+
+
+def test_closing_or_hiding_panel_does_not_equalise_remaining_members(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    first = QDockWidget("First", workspace)
+    first.setObjectName("first")
+    first.setWidget(QWidget())
+    second = QDockWidget("Second", workspace)
+    second.setObjectName("second")
+    second.setWidget(QWidget())
+    closed = QDockWidget("Closed", workspace)
+    closed.setObjectName("closed")
+    closed.setWidget(QWidget())
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, first)
+    workspace.splitDockWidget(first, second, Qt.Horizontal)
+    workspace.splitDockWidget(second, closed, Qt.Horizontal)
+    controller = PanelDockController(workspace)
+    for panel in (first, second, closed):
+        controller.register_panel(panel)
+    workspace.show()
+    qapp.processEvents()
+    workspace.resizeDocks([first, second, closed], [500, 275, 125], Qt.Horizontal)
+    qapp.processEvents()
+    tuned_widths = (first.width(), second.width(), closed.width())
+
+    closed.close()
+    qapp.processEvents()
+
+    assert abs(first.width() - second.width()) > 20
+    closed.show()
+    qapp.processEvents()
+    assert all(abs(actual - tuned) <= 2 for actual, tuned in zip(
+        (first.width(), second.width(), closed.width()), tuned_widths, strict=True
+    ))
+
+    closed.setVisible(False)
+    qapp.processEvents()
+
+    assert abs(first.width() - second.width()) > 20
+
+    workspace.close()
+    workspace.deleteLater()
+
+
+def test_dragging_tab_out_does_not_resize_group_that_stays_in_row(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    dragged_tab = QDockWidget("Dragged tab", workspace)
+    dragged_tab.setObjectName("dragged-tab")
+    dragged_tab.setWidget(QWidget())
+    remaining_tab = QDockWidget("Remaining tab", workspace)
+    remaining_tab.setObjectName("remaining-tab")
+    remaining_tab.setWidget(QWidget())
+    second = QDockWidget("Second", workspace)
+    second.setObjectName("second")
+    second.setWidget(QWidget())
+    third = QDockWidget("Third", workspace)
+    third.setObjectName("third")
+    third.setWidget(QWidget())
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, dragged_tab)
+    workspace.splitDockWidget(dragged_tab, second, Qt.Horizontal)
+    workspace.splitDockWidget(second, third, Qt.Horizontal)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, remaining_tab)
+    workspace.tabifyDockWidget(dragged_tab, remaining_tab)
+    dragged_tab.raise_()
+    controller = PanelDockController(workspace)
+    for panel in (dragged_tab, remaining_tab, second, third):
+        controller.register_panel(panel)
+    workspace.show()
+    qapp.processEvents()
+    workspace.resizeDocks([dragged_tab, second, third], [500, 275, 125], Qt.Horizontal)
+    qapp.processEvents()
+    tuned_widths = (dragged_tab.width(), second.width(), third.width())
+    remaining_tab.setGeometry(dragged_tab.geometry())
+    second.setGeometry(second.x(), dragged_tab.y(), second.width(), dragged_tab.height())
+    third.setGeometry(third.x(), dragged_tab.y(), third.width(), dragged_tab.height())
+
+    controller.finish_drag(dragged_tab, workspace.mapToGlobal(QPoint(-100, -100)), None)
+    qapp.processEvents()
+
+    assert dragged_tab.isFloating()
+    assert (remaining_tab.width(), second.width(), third.width()) == tuned_widths
+
+    workspace.close()
+    workspace.deleteLater()
+
+
 def test_dragging_registered_first_tab_into_same_row_equalises_remaining_group(qapp) -> None:
     workspace = QMainWindow()
     workspace.resize(900, 600)

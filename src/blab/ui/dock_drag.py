@@ -206,16 +206,19 @@ class PanelDockController:
         if target is not None:
             self.drop_panel(panel, target)
             return
+        departed_groups = self._departed_groups(panel)
         panel.setFloating(True)
         panel.show()
         panel.move(global_cursor - QPoint(panel.width() // 2, 12))
+        self._equalise_departed_groups(departed_groups)
 
     def drop_panel(self, panel: QDockWidget, target: Edge | PanelDropTarget) -> None:
         """Place ``panel`` at a resolved target through the public seam."""
+        departed_groups = self._departed_groups(panel)
         if isinstance(target, Edge):
             target = PanelDropTarget.outer(target)
         if target.edge is not None:
-            self._drop_at_edge(panel, target.edge)
+            self._drop_at_edge(panel, target.edge, departed_groups)
             return
         target_panel = next(
             (candidate for candidate in self._panels if self._panel_id(candidate) == target.panel_id),
@@ -230,6 +233,7 @@ class PanelDockController:
             self.workspace.tabifyDockWidget(target_panel, panel)
             panel.show()
             panel.raise_()
+            self._equalise_departed_groups(departed_groups)
             return
         if position is None:
             return
@@ -253,6 +257,7 @@ class PanelDockController:
         if target_tabs:
             self.workspace.tabifyDockWidget(target_tabs[0], target_panel)
         panel.show()
+        self._equalise_departed_groups(departed_groups)
         members = [
             candidate
             for panel_id in member_ids
@@ -262,7 +267,54 @@ class PanelDockController:
         self.workspace.resizeDocks([*members, panel], [1] * (len(members) + 1), orientation)
         target_panel.raise_()
 
-    def _drop_at_edge(self, panel: QDockWidget, edge: Edge) -> None:
+    def _departed_groups(
+        self,
+        panel: QDockWidget,
+    ) -> list[tuple[EqualiseAxis, list[QDockWidget]]]:
+        if panel.isFloating() or panel.isHidden() or self.workspace.tabifiedDockWidgets(panel):
+            return []
+        panel_id = self._panel_id(panel)
+        panel_rects = self.docked_panel_rects()
+        groups: list[tuple[EqualiseAxis, list[QDockWidget]]] = []
+        for axis in (EqualiseAxis.HORIZONTAL, EqualiseAxis.VERTICAL):
+            member_ids = aligned_layout_members(panel_rects, panel_id, axis)
+            if len(member_ids) <= 1:
+                continue
+            members: list[QDockWidget] = []
+            seen_tab_groups: set[frozenset[int]] = set()
+            for member_id in member_ids:
+                candidate = next(
+                    (item for item in self._panels if self._panel_id(item) == member_id),
+                    None,
+                )
+                if candidate is None or candidate is panel:
+                    continue
+                tab_group = [candidate, *self.workspace.tabifiedDockWidgets(candidate)]
+                tab_group_key = frozenset(id(item) for item in tab_group)
+                if tab_group_key in seen_tab_groups:
+                    continue
+                seen_tab_groups.add(tab_group_key)
+                representative = next((item for item in tab_group if item.isVisible()), candidate)
+                members.append(representative)
+            if len(members) > 1:
+                groups.append((axis, members))
+        return groups
+
+    def _equalise_departed_groups(
+        self,
+        groups: list[tuple[EqualiseAxis, list[QDockWidget]]],
+    ) -> None:
+        self.workspace.layout().activate()
+        for axis, members in groups:
+            orientation = Qt.Horizontal if axis == EqualiseAxis.HORIZONTAL else Qt.Vertical
+            self.workspace.resizeDocks(members, [1] * len(members), orientation)
+
+    def _drop_at_edge(
+        self,
+        panel: QDockWidget,
+        edge: Edge,
+        departed_groups: list[tuple[EqualiseAxis, list[QDockWidget]]],
+    ) -> None:
         orientation = Qt.Horizontal if edge in (Edge.LEFT, Edge.RIGHT) else Qt.Vertical
         axis = EqualiseAxis.HORIZONTAL if orientation == Qt.Horizontal else EqualiseAxis.VERTICAL
         panel_rects = self.docked_panel_rects()
@@ -276,6 +328,7 @@ class PanelDockController:
         self.workspace.addDockWidget(area, panel, orientation)
         panel.show()
         self.workspace.layout().activate()
+        self._equalise_departed_groups(departed_groups)
         members = [
             candidate
             for panel_id in member_ids
