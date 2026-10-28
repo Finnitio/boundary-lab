@@ -104,6 +104,9 @@ class ElectricalImpedanceCanvas(RawCoordinatePlotCanvas):
         return f"{value:.3g} Ω"
 
     def _format_secondary_crosshair_y(self, value: float) -> str:
+        return f"{value:.1f} deg"
+
+    def _format_secondary_marker_y(self, value: float) -> str:
         return f"{value:.1f}°"
 
     def set_comparison_plot(

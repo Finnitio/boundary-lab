@@ -8,8 +8,9 @@ from matplotlib.colors import to_hex
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
-from blab.spinorama import SpinoramaCurves
+from blab.spinorama import SpinoramaCurves, SpinoramaSeriesId, spinorama_curve_colors
 from blab.ui.plots import SpinoramaCanvas
+from blab.ui.theme import apply_application_theme
 
 _APP = QApplication.instance() or QApplication([])
 
@@ -111,6 +112,27 @@ def test_on_axis_turns_white_when_background_darkens_between_updates():
     canvas.update_curves(_curves())
 
     assert _styles(canvas.axes, {"On Axis"}) == {"On Axis": (WHITE, "-")}
+
+
+def test_on_axis_is_white_when_the_application_uses_the_dark_theme():
+    canvas = SpinoramaCanvas()
+    try:
+        apply_application_theme("dark")
+
+        canvas.update_curves(_curves())
+
+        assert _styles(canvas.axes, {"On Axis"}) == {"On Axis": (WHITE, "-")}
+    finally:
+        apply_application_theme("system")
+        canvas.close()
+        canvas.deleteLater()
+
+
+def test_colour_table_is_keyed_by_stable_series_identity():
+    colors = spinorama_curve_colors()
+
+    assert colors[SpinoramaSeriesId.ON_AXIS] == BLACK
+    assert colors[SpinoramaSeriesId.SOUND_POWER_DI] == RED
 
 
 @pytest.mark.parametrize("spherical", [False, True])

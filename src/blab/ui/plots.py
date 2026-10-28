@@ -19,7 +19,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu
 
 from blab.plotting import VisualizerConfig
-from blab.spinorama import SpinoramaCurves, compute_spinorama_from_planes, spinorama_curve_colors
+from blab.spinorama import SpinoramaCurves, SpinoramaSeriesId, compute_spinorama_from_planes, spinorama_curve_colors
 from blab.ui.iec_scale_canvas import IecScaleCanvasMixin
 from blab.ui.marker_readout import (
     MarkerReadoutBox,
@@ -29,6 +29,7 @@ from blab.ui.marker_readout import (
     phase_readout_curves,
 )
 from blab.ui.series_visibility import SeriesVisibilityMixin
+from blab.ui.theme import application_palette_is_dark
 
 AUDIO_FREQ_MIN_HZ = 20
 AUDIO_FREQ_MAX_HZ = 20000
@@ -60,8 +61,6 @@ SPINORAMA_DI_LIMITS = (0.0, SPINORAMA_DB_SPAN)
 # Legend baseline, in figure coordinates. Axes-relative placement scales with
 # the axes height and falls off short panels.
 SPINORAMA_LEGEND_BOTTOM = 0.006
-# Spinorama series renamed by Spherical Spin share one visibility key.
-SPINORAMA_SERIES_KEY_ALIASES = {"Spherical DI": "SPDI"}
 # Crosshair and Marker styling shared by every plot.
 CROSSHAIR_COLOR = "#101214"
 CROSSHAIR_LABEL_FACE = "#f8fbff"
@@ -83,7 +82,11 @@ class PlotLayoutProfile:
 
 @dataclass(frozen=True)
 class PlotAxisLimits:
-    """User-domain limits for a plot's primary x and y axes."""
+    """User-domain limits for a plot's primary x and y axes.
+
+    Secondary axes remain automatic; in particular, Spinorama has no separate
+    manual DI range.
+    """
 
     x_min: float
     x_max: float
@@ -1369,7 +1372,7 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
             if value is None:
                 continue
             text = (
-                self._format_crosshair_y(value) if line.axes is self.axes else self._format_secondary_crosshair_y(value)
+                self._format_crosshair_y(value) if line.axes is self.axes else self._format_secondary_marker_y(value)
             )
             rows.append(MarkerReadoutRow(curve.label, line.get_color(), text, line.get_linestyle()))
         rows.append(MarkerReadoutRow("Frequency", "none", format_plot_frequency(freq_hz), "None"))
@@ -1545,6 +1548,9 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
 
     def _format_secondary_crosshair_y(self, value: float) -> str:
         return f"{value:.1f}"
+
+    def _format_secondary_marker_y(self, value: float) -> str:
+        return self._format_secondary_crosshair_y(value)
 
 
 class ImpedanceCanvas(RawCoordinatePlotCanvas):
@@ -2063,6 +2069,7 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self._di_lines: dict[str, object] = {}
         self._series_labels: tuple[str, ...] = ()
         self._series_visibility: dict[str, bool] = {}
+        self._series_identity_by_label: dict[str, SpinoramaSeriesId] = {}
         self._plot_state = None
         super().__init__(self.figure, "Spinorama", secondary_axes=self.di_axes)
         self.set_layout_profile(SPINORAMA_LAYOUT)
@@ -2074,13 +2081,13 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self.di_axes.yaxis.tick_right()
 
     def _series_visibility_key(self, label: str) -> str:
-        # Sound-power DI keeps its hidden state when Spherical Spin renames it.
-        return SPINORAMA_SERIES_KEY_ALIASES.get(str(label), str(label))
+        return self._series_identity_by_label.get(str(label), str(label))
 
     def _reset_plot_data(self) -> None:
         self._spl_lines = {}
         self._di_lines = {}
         self._series_labels = ()
+        self._series_identity_by_label = {}
         self._plot_state = None
         self._reset_crosshair_artists()
         self._reset_comparison_interaction()
@@ -2128,7 +2135,8 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         )
 
     def _update_visible_series_limits(self) -> None:
-        # Manual limits cover only the SPL axis; the DI rule always applies.
+        # PlotAxisLimits intentionally covers only the primary SPL axis. There
+        # is no manual DI range, so the secondary axis keeps its automatic rule.
         visible_di = (line.get_ydata() for name, line in self._di_lines.items() if self.is_series_visible(name))
         self.di_axes.set_ylim(*spinorama_di_limits(visible_di))
 
@@ -2194,36 +2202,43 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         curves = state
         self._plot_state = state
         self._invalidate_crosshair_background()
-        spl_curves = curves.spl_curves()
-        di_curves = curves.di_curves()
-        colors = spinorama_curve_colors(curves, dark_background=plot_background_is_dark(self.axes))
-        labels = tuple(name for name, _values in (*spl_curves, *di_curves))
+        spl_series = curves.spl_series()
+        di_series = curves.di_series()
+        colors = spinorama_curve_colors(
+            dark_background=application_palette_is_dark() or plot_background_is_dark(self.axes)
+        )
+        labels = tuple(series.label for series in (*spl_series, *di_series))
+        self._series_identity_by_label = {
+            series.label: series.identity for series in (*spl_series, *di_series)
+        }
         if labels != self._series_labels:
             for line in (*self._spl_lines.values(), *self._di_lines.values()):
                 line.remove()
             self._spl_lines = {
-                name: self.axes.plot([], [], linewidth=1.5, label=name, color=colors.get(name))[0]
-                for name, _values in spl_curves
+                series.label: self.axes.plot(
+                    [], [], linewidth=1.5, label=series.label, color=colors[series.identity]
+                )[0]
+                for series in spl_series
             }
             self._di_lines = {
-                name: self.di_axes.plot(
+                series.label: self.di_axes.plot(
                     [],
                     [],
                     linewidth=1.2,
                     linestyle="--",
-                    label=name,
-                    color=colors.get(name),
+                    label=series.label,
+                    color=colors[series.identity],
                 )[0]
-                for name, _values in di_curves
+                for series in di_series
             }
             self._series_labels = labels
 
-        for name, values in spl_curves:
-            self._spl_lines[name].set_data(curves.freq_hz, values)
-            self._spl_lines[name].set_color(colors[name])
-        for name, values in di_curves:
-            self._di_lines[name].set_data(curves.freq_hz, values)
-            self._di_lines[name].set_color(colors[name])
+        for series in spl_series:
+            self._spl_lines[series.label].set_data(curves.freq_hz, series.values_db)
+            self._spl_lines[series.label].set_color(colors[series.identity])
+        for series in di_series:
+            self._di_lines[series.label].set_data(curves.freq_hz, series.values_db)
+            self._di_lines[series.label].set_color(colors[series.identity])
         self._apply_series_visibility()
 
         self.axes.set_ylim(*SPINORAMA_SPL_LIMITS)

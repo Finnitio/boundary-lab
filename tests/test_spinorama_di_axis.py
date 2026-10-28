@@ -101,7 +101,7 @@ def test_hidden_spherical_di_stays_out_of_the_di_axis_after_a_data_update(spinor
     assert spinorama.di_axes.get_ylim() == pytest.approx((0.0, 50.0))
 
 
-def test_manual_limits_keep_priority_on_the_spl_axis_while_the_di_rule_applies(spinorama) -> None:
+def test_manual_limits_cover_the_primary_axis_only_while_the_automatic_di_rule_applies(spinorama) -> None:
     spinorama.set_axis_limits(PlotAxisLimits(x_min=50.0, x_max=5000.0, y_min=-30.0, y_max=0.0))
     spinorama.update_curves(_curves(erdi=-3.0, spdi=2.0))
 
@@ -111,6 +111,10 @@ def test_manual_limits_keep_priority_on_the_spl_axis_while_the_di_rule_applies(s
     spinorama.set_series_visible("ERDI", False)
     assert spinorama.axes.get_ylim() == pytest.approx((-30.0, 0.0))
     assert spinorama.di_axes.get_ylim() == pytest.approx((0.0, 50.0))
+
+    # The public limits contract reports the primary frequency/SPL axes. A
+    # separate manual DI range is deliberately outside this feature's scope.
+    assert spinorama.displayed_axis_limits() == PlotAxisLimits(50.0, 5000.0, -30.0, 0.0)
 
 
 def test_empty_canvas_and_solve_reset_show_a_zero_based_di_axis(spinorama) -> None:

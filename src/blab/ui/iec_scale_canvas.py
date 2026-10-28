@@ -33,9 +33,24 @@ class IecScaleCanvasMixin:
 
     def _set_iec_scale_enabled(self, enabled: bool) -> None:
         self._iec_scale_enabled = bool(enabled)
+        self._series_legend_entries = ()
+        self._apply_series_visibility()
         self._apply_layout()
         self._invalidate_crosshair_background()
         self.draw_idle()
+
+    def _series_legend_kwargs(self) -> dict:
+        options = super()._series_legend_kwargs()
+        if not self._iec_scale_enabled:
+            return options
+        return {
+            **options,
+            "loc": "lower center",
+            "bbox_to_anchor": (0.5, 1.02),
+            "ncols": 4,
+            "borderaxespad": 0.0,
+            "frameon": False,
+        }
 
     def _after_layout_profile_applied(self) -> None:
         super()._after_layout_profile_applied()
