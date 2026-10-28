@@ -34,6 +34,38 @@ class EqualiseAxis(Enum):
 
 
 @dataclass(frozen=True)
+class Placement:
+    """Axis and ordering shared by edge and compass placements."""
+
+    axis: EqualiseAxis
+    before: bool
+
+
+_EDGE_PLACEMENTS = {
+    Edge.LEFT: Placement(EqualiseAxis.HORIZONTAL, True),
+    Edge.RIGHT: Placement(EqualiseAxis.HORIZONTAL, False),
+    Edge.TOP: Placement(EqualiseAxis.VERTICAL, True),
+    Edge.BOTTOM: Placement(EqualiseAxis.VERTICAL, False),
+}
+_COMPASS_PLACEMENTS = {
+    CompassPosition.LEFT: Placement(EqualiseAxis.HORIZONTAL, True),
+    CompassPosition.RIGHT: Placement(EqualiseAxis.HORIZONTAL, False),
+    CompassPosition.TOP: Placement(EqualiseAxis.VERTICAL, True),
+    CompassPosition.BOTTOM: Placement(EqualiseAxis.VERTICAL, False),
+}
+
+
+def edge_placement(edge: Edge) -> Placement:
+    """Return the axis and ordering for an outer-edge drop."""
+    return _EDGE_PLACEMENTS[edge]
+
+
+def compass_placement(position: CompassPosition) -> Placement | None:
+    """Return side-placement metadata, or ``None`` for the centre target."""
+    return _COMPASS_PLACEMENTS.get(position)
+
+
+@dataclass(frozen=True)
 class PanelDropTarget:
     """One resolved outer-edge or panel-relative drop target."""
 
@@ -94,16 +126,13 @@ def edge_target_rects(workspace: Rect) -> dict[Edge, Rect]:
 def resolve_outer_edge_target(
     cursor: Point,
     workspace: Rect,
-    dragged_panel: Rect | None = None,
 ) -> Edge | None:
-    """Resolve a cursor to an outer edge, or ``None`` for an unchanged drop."""
+    """Resolve a cursor to an outer edge."""
     if not workspace.contains(cursor):
         return None
     for edge, target in edge_target_rects(workspace).items():
         if target.contains(cursor):
             return edge
-    if dragged_panel is not None and dragged_panel.contains(cursor):
-        return None
     return None
 
 
@@ -192,32 +221,44 @@ def top_level_layout_members(
     return tuple(representatives[span] for span in sorted(representatives))
 
 
-def preview_rect(workspace: Rect, edge: Edge) -> Rect:
-    """Return the half-workspace preview for an edge drop."""
-    if edge == Edge.LEFT:
-        return Rect(workspace.x, workspace.y, workspace.width // 2, workspace.height)
-    if edge == Edge.RIGHT:
-        left = workspace.x + workspace.width // 2
-        return Rect(left, workspace.y, workspace.right - left, workspace.height)
-    if edge == Edge.TOP:
-        return Rect(workspace.x, workspace.y, workspace.width, workspace.height // 2)
-    top = workspace.y + workspace.height // 2
-    return Rect(workspace.x, top, workspace.width, workspace.bottom - top)
+def preview_rect(workspace: Rect, edge: Edge, existing_members: int = 1) -> Rect:
+    """Return the final equal-share area for an outer-edge drop."""
+    placement = edge_placement(edge)
+    divisor = existing_members + 1
+    if placement.axis == EqualiseAxis.HORIZONTAL:
+        width = workspace.width // divisor
+        left = workspace.x if placement.before else workspace.right - width
+        return Rect(left, workspace.y, width, workspace.height)
+    height = workspace.height // divisor
+    top = workspace.y if placement.before else workspace.bottom - height
+    return Rect(workspace.x, top, workspace.width, height)
 
 
-def panel_preview_rect(panel: Rect, position: CompassPosition) -> Rect:
-    """Return the area a panel-relative drop will occupy."""
-    if position == CompassPosition.LEFT:
-        return Rect(panel.x, panel.y, panel.width // 2, panel.height)
-    if position == CompassPosition.RIGHT:
-        left = panel.x + panel.width // 2
-        return Rect(left, panel.y, panel.right - left, panel.height)
-    if position == CompassPosition.TOP:
-        return Rect(panel.x, panel.y, panel.width, panel.height // 2)
-    if position == CompassPosition.BOTTOM:
-        top = panel.y + panel.height // 2
-        return Rect(panel.x, top, panel.width, panel.bottom - top)
-    return panel
+def panel_preview_rect(
+    panel_rects: Mapping[str, Rect],
+    panel_id: str,
+    position: CompassPosition,
+) -> Rect | None:
+    """Return the dropped panel's final equal-share area beside ``panel_id``."""
+    panel = panel_rects.get(panel_id)
+    if panel is None:
+        return None
+    placement = compass_placement(position)
+    if placement is None:
+        return panel
+    member_ids = aligned_layout_members(panel_rects, panel_id, placement.axis)
+    members = [panel_rects[member_id] for member_id in member_ids]
+    target_index = member_ids.index(panel_id)
+    insertion_index = target_index if placement.before else target_index + 1
+    if placement.axis == EqualiseAxis.HORIZONTAL:
+        left = min(rect.x for rect in members)
+        right = max(rect.right for rect in members)
+        width = (right - left) // (len(members) + 1)
+        return Rect(left + insertion_index * width, panel.y, width, panel.height)
+    top = min(rect.y for rect in members)
+    bottom = max(rect.bottom for rect in members)
+    height = (bottom - top) // (len(members) + 1)
+    return Rect(panel.x, top + insertion_index * height, panel.width, height)
 
 
 __all__ = [
@@ -229,7 +270,9 @@ __all__ = [
     "Rect",
     "compass_target_rects",
     "aligned_layout_members",
+    "compass_placement",
     "edge_target_rects",
+    "edge_placement",
     "panel_preview_rect",
     "panel_under_cursor",
     "preview_rect",
