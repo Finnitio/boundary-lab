@@ -186,9 +186,11 @@ class PlotMarkerOverlay:
         self._label.set_position((axis_x, MARKER_LABEL_AXES_Y))
         self._label.set_text(format_plot_frequency(freq_hz))
         self._line.set_visible(True)
-        self._label.set_visible(True)
         readout = tuple(self._canvas.update_marker_readout(freq_hz))
-        return (self._line, self._label, *readout)
+        self._label.set_visible(not readout)
+        if readout:
+            return (self._line, *readout)
+        return (self._line, self._label)
 
     def _ensure_artists(self) -> None:
         axes = self._canvas.axes

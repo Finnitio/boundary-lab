@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 from blab.ui.plot_marker import PlotMarker, PlotMarkerOverlay
-from blab.ui.plots import ImpedanceCanvas, IsobarCanvas, OnAxisResponseCanvas
+from blab.ui.plots import ImpedanceCanvas, IsobarCanvas, OnAxisResponseCanvas, format_plot_frequency
 
 _APP = QApplication.instance() or QApplication([])
 
@@ -110,7 +110,8 @@ def test_hovering_one_plot_moves_the_marker_on_every_plot(canvases) -> None:
     hovered = _marker_line_frequency(impedance)
     assert hovered == pytest.approx(1000.0, rel=_PIXEL_REL)
     assert _marker_line_frequency(on_axis) == pytest.approx(hovered)
-    assert _marker_label_text(impedance) == _marker_label_text(on_axis) == f"{hovered:.0f} Hz"
+    assert _marker_label_text(impedance) is None
+    assert _marker_label_text(on_axis) is None
 
 
 def test_click_locks_the_marker_and_a_second_click_unlocks_it(canvases) -> None:
@@ -145,7 +146,7 @@ def test_marker_is_clamped_to_each_plots_frequency_range(canvases) -> None:
 
     assert _marker_line_frequency(wide) == pytest.approx(10000.0, rel=_PIXEL_REL)
     assert _marker_line_frequency(narrow) == pytest.approx(2000.0)
-    assert _marker_label_text(narrow) == "2 kHz"
+    assert _marker_label_text(narrow) is None
 
 
 def test_isobar_plot_shows_the_marker_line_and_frequency(canvases) -> None:
@@ -160,7 +161,8 @@ def test_isobar_plot_shows_the_marker_line_and_frequency(canvases) -> None:
 
     hovered = _marker_line_frequency(response)
     assert _marker_line_frequency(isobar) == pytest.approx(hovered)
-    assert _marker_label_text(isobar) == _marker_label_text(response)
+    assert _marker_label_text(isobar) == format_plot_frequency(hovered)
+    assert _marker_label_text(response) is None
 
     _hover(isobar, 300.0)
     assert _marker_line_frequency(response) == pytest.approx(300.0, rel=_PIXEL_REL)
@@ -219,7 +221,7 @@ def test_crosshair_is_hidden_and_inactive_while_the_marker_is_on(canvases) -> No
     assert crosshair_frequency_text() is None
     _click(canvas, 300.0)
     assert crosshair_frequency_text() is None
-    assert _marker_label_text(canvas) is not None
+    assert _marker_label_text(canvas) is None
 
     marker.action.setChecked(False)
     assert crosshair_frequency_text() == crosshair_text
