@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QAction, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QDockWidget, QMainWindow, QWidget
 
 from blab.ui.dock_drag import PanelDockController
-from blab.ui.dock_targets import Edge, Point, Rect, resolve_outer_edge_target
+from blab.ui.dock_targets import (
+    CompassPosition,
+    Edge,
+    PanelDropTarget,
+    Point,
+    Rect,
+    resolve_drop_target,
+    resolve_outer_edge_target,
+)
 from blab.ui.main_window_widgets import DockTitleBar
 
 
@@ -26,6 +36,41 @@ def test_cursor_outside_edges_or_on_dragged_panels_unchanged_position_has_no_tar
 
     assert resolve_outer_edge_target(Point(99, 500), workspace, dragged_panel) is None
     assert resolve_outer_edge_target(Point(500, 400), workspace, dragged_panel) is None
+
+
+def test_cursor_resolves_each_compass_target_and_centre_over_panel() -> None:
+    workspace = Rect(0, 0, 900, 600)
+    panels = {"target": Rect(200, 100, 480, 400)}
+
+    expected = {
+        Point(376, 300): CompassPosition.LEFT,
+        Point(504, 300): CompassPosition.RIGHT,
+        Point(440, 236): CompassPosition.TOP,
+        Point(440, 364): CompassPosition.BOTTOM,
+        Point(440, 300): CompassPosition.CENTER,
+    }
+    for cursor, position in expected.items():
+        assert resolve_drop_target(cursor, workspace, panels) == PanelDropTarget.panel("target", position)
+
+
+def test_outer_edge_precedes_compass_and_dragged_group_is_not_a_target() -> None:
+    workspace = Rect(0, 0, 400, 300)
+    panels = {
+        "edge-panel": Rect(0, 0, 120, 300),
+        "dragged": Rect(120, 0, 280, 300),
+        "dragged-tab": Rect(120, 0, 280, 300),
+    }
+
+    assert resolve_drop_target(Point(59, 150), workspace, panels) == PanelDropTarget.outer(Edge.LEFT)
+    assert (
+        resolve_drop_target(
+            Point(260, 150),
+            workspace,
+            panels,
+            excluded_panel_ids={"dragged", "dragged-tab"},
+        )
+        is None
+    )
 
 
 def test_public_drop_entry_point_docks_at_outer_edge_and_state_round_trips(qapp) -> None:
@@ -52,6 +97,71 @@ def test_public_drop_entry_point_docks_at_outer_edge_and_state_round_trips(qapp)
     state = workspace.saveState()
     assert not state.isEmpty()
     assert workspace.restoreState(state)
+
+    workspace.close()
+    workspace.deleteLater()
+
+
+def test_public_drop_entry_point_places_panel_on_each_side(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    controller = PanelDockController(workspace)
+    targets: list[tuple[CompassPosition, Callable[[QDockWidget, QDockWidget], bool]]] = [
+        (CompassPosition.LEFT, lambda moved, target: moved.x() < target.x()),
+        (CompassPosition.RIGHT, lambda moved, target: moved.x() > target.x()),
+        (CompassPosition.TOP, lambda moved, target: moved.y() < target.y()),
+        (CompassPosition.BOTTOM, lambda moved, target: moved.y() > target.y()),
+    ]
+
+    for index, (position, is_on_requested_side) in enumerate(targets):
+        target = QDockWidget(f"Target {index}", workspace)
+        target.setObjectName(f"target-{index}")
+        target.setWidget(QWidget())
+        moved = QDockWidget(f"Moved {index}", workspace)
+        moved.setObjectName(f"moved-{index}")
+        moved.setWidget(QWidget())
+        workspace.addDockWidget(Qt.LeftDockWidgetArea, target)
+        workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+        controller.register_panel(target)
+        controller.register_panel(moved)
+        workspace.show()
+        qapp.processEvents()
+
+        controller.drop_panel(moved, PanelDropTarget.panel(target.objectName(), position))
+        qapp.processEvents()
+
+        assert is_on_requested_side(moved, target), position
+        workspace.removeDockWidget(moved)
+        workspace.removeDockWidget(target)
+        moved.deleteLater()
+        target.deleteLater()
+        qapp.processEvents()
+
+    workspace.close()
+    workspace.deleteLater()
+
+
+def test_public_drop_entry_point_tabs_panel_with_target(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    target = QDockWidget("Target", workspace)
+    target.setObjectName("target")
+    target.setWidget(QWidget())
+    moved = QDockWidget("Moved", workspace)
+    moved.setObjectName("moved")
+    moved.setWidget(QWidget())
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, target)
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    controller = PanelDockController(workspace)
+    controller.register_panel(target)
+    controller.register_panel(moved)
+    workspace.show()
+    qapp.processEvents()
+
+    controller.drop_panel(moved, PanelDropTarget.panel("target", CompassPosition.CENTER))
+    qapp.processEvents()
+
+    assert moved in workspace.tabifiedDockWidgets(target)
 
     workspace.close()
     workspace.deleteLater()
