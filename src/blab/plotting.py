@@ -11,7 +11,7 @@ import numpy as np
 from matplotlib.colors import BoundaryNorm, ListedColormap
 
 from blab.defaults import FORMATTED_OUTPUT_NPZ, PLOT_OUTPUT_DIR
-from blab.spinorama import SpinoramaCurves, compute_spinorama_from_planes
+from blab.spinorama import SpinoramaCurves, compute_spinorama_from_planes, spinorama_curve_colors
 
 PLOT_TITLE_SIZE = 11
 PLOT_LABEL_SIZE = 9
@@ -290,25 +290,17 @@ def _save_spinorama_plot(
     di_ax = ax.twinx()
     di_ax.yaxis.set_label_position("right")
     di_ax.yaxis.tick_right()
-    colors = {
-        "On Axis": "#1f77b4",
-        "Listen. Wind.": "#2ca02c",
-        "Early Refl.": "#ff7f0e",
-        "Sound Power": "#d62728",
-        "PIR": "#9467bd",
-        "ERDI": "#8c564b",
-        "SPDI": "#17becf",
-    }
-    for name, values in curves.spl_curves():
-        ax.plot(curves.freq_hz, values, linewidth=1.8, label=name, color=colors.get(name))
-    for name, values in curves.di_curves():
+    spl_colors, di_colors = spinorama_curve_colors()
+    for (name, values), color in zip(curves.spl_curves(), spl_colors, strict=True):
+        ax.plot(curves.freq_hz, values, linewidth=1.8, label=name, color=color)
+    for (name, values), color in zip(curves.di_curves(), di_colors, strict=True):
         di_ax.plot(
             curves.freq_hz,
             values,
             linewidth=1.4,
             linestyle="--",
             label=name,
-            color=colors.get(name),
+            color=color,
         )
 
     _setup_log_frequency_axis(ax)
