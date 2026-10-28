@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
+from typing import Literal
 
 IEC_DB_PER_DECADE = 25.0
 
 Box = tuple[float, float, float, float]
+
+
+@dataclass(frozen=True)
+class SpinoramaIecLayout:
+    """Axes and legend placement for a Spinorama 25 dB/dec layout."""
+
+    axes_box: Box
+    legend_placement: Literal["right", "bottom"]
+    legend_anchor: tuple[float, float] | None
 
 
 def iec_axes_box(
@@ -40,4 +51,46 @@ def iec_axes_box(
         y0 + 0.5 * (height - box_height),
         box_width,
         box_height,
+    )
+
+
+def spinorama_iec_layout(
+    *,
+    right_available: Box,
+    bottom_available: Box,
+    x_limits: tuple[float, float],
+    y_limits: tuple[float, float],
+    legend_size: tuple[float, float],
+    legend_gap: float,
+) -> SpinoramaIecLayout:
+    """Choose the right Spinorama legend when it fits beside the IEC axes box.
+
+    All boxes and sizes use the same physical unit. The right-hand candidate is
+    evaluated first. Its axes box and legend are centred horizontally as one
+    group, with the legend top aligned to the axes box. A candidate that is too
+    wide or taller than the axes falls back to the bottom-legend available area.
+    """
+
+    right_box = iec_axes_box(right_available, x_limits, y_limits)
+    available_width = max(float(right_available[2]), 0.0)
+    axes_width = max(float(right_box[2]), 0.0)
+    axes_height = max(float(right_box[3]), 0.0)
+    legend_width = max(float(legend_size[0]), 0.0)
+    legend_height = max(float(legend_size[1]), 0.0)
+    gap = max(float(legend_gap), 0.0)
+    fits_right = legend_width + gap <= available_width - axes_width and legend_height <= axes_height
+    if fits_right:
+        group_width = axes_width + gap + legend_width
+        axes_x = float(right_available[0]) + 0.5 * (available_width - group_width)
+        axes_box = (axes_x, right_box[1], axes_width, axes_height)
+        return SpinoramaIecLayout(
+            axes_box=axes_box,
+            legend_placement="right",
+            legend_anchor=(axes_x + axes_width + gap, right_box[1] + axes_height),
+        )
+
+    return SpinoramaIecLayout(
+        axes_box=iec_axes_box(bottom_available, x_limits, y_limits),
+        legend_placement="bottom",
+        legend_anchor=None,
     )

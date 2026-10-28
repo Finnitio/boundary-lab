@@ -28,6 +28,7 @@ from blab.ui.marker_readout import (
     interpolate_log_frequency,
     phase_readout_curves,
 )
+from blab.ui.plot_scale import spinorama_iec_layout
 from blab.ui.series_visibility import SeriesVisibilityMixin
 from blab.ui.theme import application_palette_is_dark
 
@@ -110,6 +111,8 @@ SINGLE_AXIS_LAYOUT = PlotLayoutProfile(left_pt=52.0, right_pt=14.0)
 DUAL_AXIS_LAYOUT = PlotLayoutProfile(left_pt=52.0, right_pt=52.0)
 ISOBAR_LAYOUT = PlotLayoutProfile(left_pt=50.0, right_pt=58.0)
 SPINORAMA_LAYOUT = PlotLayoutProfile(left_pt=52.0, right_pt=52.0, bottom_pt=58.0)
+SPINORAMA_RIGHT_LEGEND_LAYOUT = PlotLayoutProfile(left_pt=8.0, right_pt=8.0)
+SPINORAMA_RIGHT_LEGEND_GAP_PT = 52.0
 
 
 def spinorama_di_limits(visible_di_db: Iterable[np.ndarray]) -> tuple[float, float]:
@@ -146,6 +149,25 @@ def apply_figure_layout(figure: Figure, profile: PlotLayoutProfile) -> None:
         profile.min_axes_height_pt,
     )
     figure.subplots_adjust(left=left, right=right, top=top, bottom=bottom)
+
+
+def _figure_layout_box(figure: Figure, profile: PlotLayoutProfile) -> tuple[float, float, float, float]:
+    """Return a layout profile's axes area in physical inches without applying it."""
+
+    width_in, height_in = (float(value) for value in figure.get_size_inches())
+    left, right = _layout_axis_edges(
+        width_in * 72.0,
+        profile.left_pt,
+        profile.right_pt,
+        profile.min_axes_width_pt,
+    )
+    bottom, top = _layout_axis_edges(
+        height_in * 72.0,
+        profile.bottom_pt,
+        profile.top_pt,
+        profile.min_axes_height_pt,
+    )
+    return left * width_in, bottom * height_in, (right - left) * width_in, (top - bottom) * height_in
 
 
 def figure_point_fraction(figure: Figure, points: float, *, axis: str) -> float:
@@ -2065,6 +2087,8 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self.figure = Figure(figsize=(6.5, 3.9), dpi=100)
         self.axes = self.figure.add_subplot(111)
         self.di_axes = self.axes.twinx()
+        self._spinorama_legend_placement = "bottom"
+        self._right_legend_size_inches: tuple[float, float] | None = None
         self._spl_lines: dict[str, object] = {}
         self._di_lines: dict[str, object] = {}
         self._series_labels: tuple[str, ...] = ()
@@ -2079,6 +2103,60 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self._apply_layout_profile()
         self.di_axes.yaxis.set_label_position("right")
         self.di_axes.yaxis.tick_right()
+
+    def _set_iec_scale_enabled(self, enabled: bool) -> None:
+        self._spinorama_legend_placement = "right" if enabled else "bottom"
+        super()._set_iec_scale_enabled(enabled)
+
+    def _fit_iec_axes_box(self) -> None:
+        if not self._iec_scale_enabled:
+            return
+        figure = self.figure
+        figure_width, figure_height = (float(value) for value in figure.get_size_inches())
+        legend = self.axes.get_legend()
+        if legend is None:
+            return super()._fit_iec_axes_box()
+
+        if self._spinorama_legend_placement == "right":
+            renderer = figure.canvas.get_renderer()
+            legend_box = legend.get_window_extent(renderer)
+            dpi = float(figure.dpi)
+            self._right_legend_size_inches = (legend_box.width / dpi, legend_box.height / dpi)
+        legend_size = self._right_legend_size_inches
+        if legend_size is None:
+            # A new set of labels is first built as a one-column candidate, so
+            # this is only reachable for an empty or not-yet-rendered legend.
+            legend_size = (0.0, 0.0)
+
+        layout = spinorama_iec_layout(
+            right_available=_figure_layout_box(figure, SPINORAMA_RIGHT_LEGEND_LAYOUT),
+            bottom_available=_figure_layout_box(figure, SPINORAMA_LAYOUT),
+            x_limits=self._x_limits_to_user_domain(self.axes.get_xlim()),
+            y_limits=self.axes.get_ylim(),
+            legend_size=legend_size,
+            legend_gap=SPINORAMA_RIGHT_LEGEND_GAP_PT / 72.0,
+        )
+        if layout.legend_placement != self._spinorama_legend_placement:
+            self._spinorama_legend_placement = layout.legend_placement
+            self._series_legend_entries = ()
+            self._apply_series_visibility()
+            legend = self.axes.get_legend()
+
+        if layout.legend_anchor is not None and legend is not None:
+            anchor_x, anchor_y = layout.legend_anchor
+            legend.set_bbox_to_anchor(
+                (anchor_x / figure_width, anchor_y / figure_height),
+                transform=figure.transFigure,
+            )
+        axes_box = layout.axes_box
+        normalized_box = (
+            axes_box[0] / figure_width,
+            axes_box[1] / figure_height,
+            axes_box[2] / figure_width,
+            axes_box[3] / figure_height,
+        )
+        for axes in (self.axes, self.di_axes):
+            axes.set_position(normalized_box)
 
     def _series_visibility_key(self, label: str) -> str:
         return self._series_identity_by_label.get(str(label), str(label))
@@ -2118,6 +2196,23 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         lines = {**self._spl_lines, **self._di_lines}
         for name, line in lines.items():
             line.set_visible(self.is_series_visible(name))
+        if self._iec_scale_enabled and self._right_legend_size_inches is None:
+            self._spinorama_legend_placement = "right"
+        if self._iec_scale_enabled and self._spinorama_legend_placement == "right":
+            self._show_series_legend(
+                lines.items(),
+                loc="upper left",
+                bbox_to_anchor=(1.0, 1.0),
+                bbox_transform=self.figure.transFigure,
+                ncols=1,
+                borderaxespad=0.0,
+                frameon=False,
+                borderpad=0.0,
+                labelspacing=0.25,
+                handlelength=1.6,
+                handletextpad=0.5,
+            )
+            return
         self._show_series_legend(
             lines.items(),
             loc="lower center",
@@ -2212,6 +2307,7 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
             series.label: series.identity for series in (*spl_series, *di_series)
         }
         if labels != self._series_labels:
+            self._right_legend_size_inches = None
             for line in (*self._spl_lines.values(), *self._di_lines.values()):
                 line.remove()
             self._spl_lines = {
