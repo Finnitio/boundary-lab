@@ -92,20 +92,25 @@ class SeriesVisibilityMixin:
     def _build_series_legend(self, entries: Sequence[tuple[str, object]], legend_kwargs: dict) -> None:
         self._series_legend_entries = entries
         self._series_legend_targets: dict[object, str] = {}
+        self._series_legend_handles: list[tuple[object, object]] = []
         self._series_legend = None
         if not entries:
             return
         legend_kwargs.setdefault("loc", "best")
         lines = [line for _label, line in entries]
         legend = self.axes.legend(lines, [line.get_label() for line in lines], **legend_kwargs)
-        for (label, _line), handle, text in zip(entries, legend.legend_handles, legend.get_texts(), strict=True):
+        for (label, line), handle, text in zip(entries, legend.legend_handles, legend.get_texts(), strict=True):
             handle.set_picker(LEGEND_HANDLE_PICK_RADIUS)
             text.set_picker(True)
             self._series_legend_targets[handle] = label
             self._series_legend_targets[text] = label
+            self._series_legend_handles.append((handle, line))
         self._series_legend = legend
 
     def _style_series_legend(self) -> None:
+        # Handles are copies made when the legend was built; follow later curve colour changes.
+        for handle, line in getattr(self, "_series_legend_handles", ()):
+            handle.set_color(line.get_color())
         for artist, label in getattr(self, "_series_legend_targets", {}).items():
             artist.set_alpha(None if self.is_series_visible(label) else HIDDEN_LEGEND_ENTRY_ALPHA)
 

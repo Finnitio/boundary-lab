@@ -7,6 +7,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
+from matplotlib.colors import to_hex
 from PySide6.QtWidgets import QApplication
 
 from blab.spinorama import SpinoramaCurves
@@ -14,6 +15,7 @@ from blab.ui.electrical_impedance_plot import ElectricalImpedanceCanvas
 from blab.ui.excursion_plot import ExcursionCanvas
 from blab.ui.group_delay_plot import GroupDelayCanvas
 from blab.ui.max_spl_plot import MaxSplCanvas
+from blab.ui.plot_marker import PlotMarker, PlotMarkerOverlay
 from blab.ui.plots import ImpedanceCanvas, OnAxisResponseCanvas, SpinoramaCanvas
 
 _APP = QApplication.instance() or QApplication([])
@@ -134,6 +136,17 @@ def test_legend_click_inside_the_axes_does_not_place_the_crosshair(max_spl) -> N
 
     crosshair_lines = [line for line in max_spl.axes.get_lines() if line not in series_lines]
     assert not any(line.get_visible() for line in crosshair_lines)
+
+
+def test_legend_click_inside_the_axes_does_not_lock_the_marker(max_spl) -> None:
+    marker = PlotMarker()
+    PlotMarkerOverlay(max_spl, marker)
+    marker.action.setChecked(True)
+
+    _click_legend_entry(max_spl, max_spl.axes, "HF")
+
+    assert not marker.locked
+    assert not _line(max_spl.axes, "HF").get_visible()
 
 
 def _impedance():
@@ -305,3 +318,13 @@ def test_hidden_sound_power_di_stays_hidden_across_the_spherical_rename(spinoram
 
     assert spinorama.is_series_visible("SPDI")
     assert "SPDI" in _visible_curves(spinorama)
+
+
+def test_spinorama_legend_follows_a_curve_colour_change_between_updates(spinorama) -> None:
+    spinorama.axes.set_facecolor("#293134")
+
+    spinorama.update_curves(_spinorama_curves(offset=1.0))
+
+    assert to_hex(_legend_handle(spinorama.axes, "On Axis").get_color()) == to_hex(
+        _line(spinorama.axes, "On Axis").get_color()
+    )
