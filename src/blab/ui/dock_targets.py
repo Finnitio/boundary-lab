@@ -26,6 +26,13 @@ class CompassPosition(Enum):
     CENTER = "center"
 
 
+class EqualiseAxis(Enum):
+    """The dimension shared equally by one logical dock row or column."""
+
+    HORIZONTAL = "horizontal"
+    VERTICAL = "vertical"
+
+
 @dataclass(frozen=True)
 class PanelDropTarget:
     """One resolved outer-edge or panel-relative drop target."""
@@ -150,6 +157,41 @@ def resolve_drop_target(
     return None
 
 
+def aligned_layout_members(
+    panel_rects: Mapping[str, Rect],
+    anchor_panel_id: str,
+    axis: EqualiseAxis,
+) -> tuple[str, ...]:
+    """Return one representative per logical group aligned with ``anchor``."""
+    anchor = panel_rects.get(anchor_panel_id)
+    if anchor is None:
+        return ()
+
+    def is_aligned(rect: Rect) -> bool:
+        if axis == EqualiseAxis.HORIZONTAL:
+            return (rect.y, rect.height) == (anchor.y, anchor.height)
+        return (rect.x, rect.width) == (anchor.x, anchor.width)
+
+    representatives: dict[Rect, str] = {anchor: anchor_panel_id}
+    for panel_id, rect in panel_rects.items():
+        if is_aligned(rect) and rect not in representatives:
+            representatives[rect] = panel_id
+    coordinate = (lambda item: item[0].x) if axis == EqualiseAxis.HORIZONTAL else (lambda item: item[0].y)
+    return tuple(panel_id for _, panel_id in sorted(representatives.items(), key=coordinate))
+
+
+def top_level_layout_members(
+    panel_rects: Mapping[str, Rect],
+    axis: EqualiseAxis,
+) -> tuple[str, ...]:
+    """Return one representative for each distinct top-level row or column."""
+    representatives: dict[tuple[int, int], str] = {}
+    for panel_id, rect in panel_rects.items():
+        span = (rect.x, rect.width) if axis == EqualiseAxis.HORIZONTAL else (rect.y, rect.height)
+        representatives.setdefault(span, panel_id)
+    return tuple(representatives[span] for span in sorted(representatives))
+
+
 def preview_rect(workspace: Rect, edge: Edge) -> Rect:
     """Return the half-workspace preview for an edge drop."""
     if edge == Edge.LEFT:
@@ -181,14 +223,17 @@ def panel_preview_rect(panel: Rect, position: CompassPosition) -> Rect:
 __all__ = [
     "CompassPosition",
     "Edge",
+    "EqualiseAxis",
     "PanelDropTarget",
     "Point",
     "Rect",
     "compass_target_rects",
+    "aligned_layout_members",
     "edge_target_rects",
     "panel_preview_rect",
     "panel_under_cursor",
     "preview_rect",
     "resolve_drop_target",
     "resolve_outer_edge_target",
+    "top_level_layout_members",
 ]
