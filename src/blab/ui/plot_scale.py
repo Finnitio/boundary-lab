@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Literal
+from enum import StrEnum
 
 IEC_DB_PER_DECADE = 25.0
 
 Box = tuple[float, float, float, float]
+
+
+class SpinoramaLegendPlacement(StrEnum):
+    """Supported legend positions for a Spinorama IEC layout."""
+
+    RIGHT = "right"
+    BOTTOM = "bottom"
 
 
 @dataclass(frozen=True)
@@ -16,7 +23,7 @@ class SpinoramaIecLayout:
     """Axes and legend placement for a Spinorama 25 dB/dec layout."""
 
     axes_box: Box
-    legend_placement: Literal["right", "bottom"]
+    legend_placement: SpinoramaLegendPlacement
     legend_anchor: tuple[float, float] | None
 
 
@@ -85,12 +92,12 @@ def spinorama_iec_layout(
         axes_box = (axes_x, right_box[1], axes_width, axes_height)
         return SpinoramaIecLayout(
             axes_box=axes_box,
-            legend_placement="right",
+            legend_placement=SpinoramaLegendPlacement.RIGHT,
             legend_anchor=(axes_x + axes_width + gap, right_box[1] + axes_height),
         )
 
     return SpinoramaIecLayout(
         axes_box=iec_axes_box(bottom_available, x_limits, y_limits),
-        legend_placement="bottom",
+        legend_placement=SpinoramaLegendPlacement.BOTTOM,
         legend_anchor=None,
     )

@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from blab.spinorama import SpinoramaCurves
 from blab.ui.max_spl_plot import MaxSplCanvas
-from blab.ui.plot_scale import iec_axes_box, spinorama_iec_layout
+from blab.ui.plot_scale import SpinoramaLegendPlacement, iec_axes_box, spinorama_iec_layout
 from blab.ui.plots import OnAxisResponseCanvas, PlotAxisLimits, SpinoramaCanvas
 
 _APP = QApplication.instance() or QApplication([])
@@ -53,7 +53,7 @@ def test_spinorama_legend_uses_the_right_when_it_fits_and_centres_the_group() ->
         legend_gap=1.0,
     )
 
-    assert layout.legend_placement == "right"
+    assert layout.legend_placement is SpinoramaLegendPlacement.RIGHT
     assert layout.axes_box == pytest.approx((1.5, 0.0, 6.0, 4.0))
     assert layout.legend_anchor == pytest.approx((8.5, 4.0))
     assert layout.axes_box[0] + (layout.axes_box[2] + 1.0 + 2.0) / 2.0 == pytest.approx(6.0)
@@ -70,7 +70,7 @@ def test_spinorama_legend_falls_back_to_the_bottom_when_it_does_not_fit(legend_s
         legend_gap=1.0,
     )
 
-    assert layout.legend_placement == "bottom"
+    assert layout.legend_placement is SpinoramaLegendPlacement.BOTTOM
     assert layout.axes_box == pytest.approx((3.75, 1.0, 4.5, 3.0))
     assert layout.legend_anchor is None
 
