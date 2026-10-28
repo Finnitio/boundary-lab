@@ -239,8 +239,21 @@ class InteractivePlotCanvas(FigureCanvas):
         self._crosshair_background = None
         self._empty_plot_pending = False
         self._redraw_on_show = False
+        self._marker_overlay = None
         super().__init__(figure)
         self._connect_interaction_events()
+
+    def set_marker_overlay(self, overlay) -> None:
+        """Attach the shared Marker drawing from ``blab.ui.plot_marker``."""
+        self._marker_overlay = overlay
+
+    def _marker_hides_crosshair(self) -> bool:
+        return self._marker_overlay is not None and self._marker_overlay.enabled
+
+    def _update_marker_readout(self, freq_hz: float | None) -> tuple[object, ...]:
+        """Update per-curve values at the Marker (``None`` hides them); return artists to blit."""
+        del freq_hz
+        return ()
 
     def clear_for_solve(self) -> None:
         """Discard current data now, rebuilding hidden axes only when needed."""
@@ -459,6 +472,8 @@ class InteractivePlotCanvas(FigureCanvas):
         self._end_comparison()
 
     def _on_crosshair_button_press(self, event) -> None:
+        if self._marker_hides_crosshair():
+            return
         if not self._event_is_in_plot(event) or event.button != MouseButton.LEFT:
             return
         if getattr(event, "dblclick", False):
@@ -474,6 +489,8 @@ class InteractivePlotCanvas(FigureCanvas):
             self._crosshair_dragging = False
 
     def _on_crosshair_motion(self, event) -> None:
+        if self._marker_hides_crosshair():
+            return
         if not self._crosshair_dragging or not self._event_is_in_plot(event):
             return
         self._set_crosshair_from_event(event)
@@ -514,6 +531,7 @@ class InteractivePlotCanvas(FigureCanvas):
             self.draw_idle()
 
     def _set_crosshair_artist_visibility(self, visible: bool) -> None:
+        visible = visible and not self._marker_hides_crosshair()
         for artist in self._crosshair_artists():
             if artist is not None:
                 artist.set_visible(visible)
