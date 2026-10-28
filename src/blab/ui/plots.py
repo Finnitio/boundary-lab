@@ -10,7 +10,7 @@ from matplotlib import rcParams
 from matplotlib.backend_bases import MouseButton
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.cm import ScalarMappable
-from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, Normalize
+from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap, Normalize, to_rgba
 from matplotlib.figure import Figure
 from matplotlib.ticker import LogLocator, MultipleLocator
 from PySide6.QtCore import Signal
@@ -18,7 +18,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu
 
 from blab.plotting import VisualizerConfig
-from blab.spinorama import SpinoramaCurves, compute_spinorama_from_planes
+from blab.spinorama import SpinoramaCurves, compute_spinorama_from_planes, spinorama_curve_colors
 
 AUDIO_FREQ_MIN_HZ = 20
 AUDIO_FREQ_MAX_HZ = 20000
@@ -167,6 +167,18 @@ def clear_plot_axes(axes) -> None:
     if axes.get_xscale() != "linear":
         axes.set_xscale("linear")
     axes.clear()
+
+
+def plot_background_is_dark(axes) -> bool:
+    """Whether curves on ``axes`` are drawn over a dark background.
+
+    Uses the axes face colour, or the figure's when the axes are transparent.
+    """
+    for facecolor in (axes.get_facecolor(), axes.get_figure().get_facecolor()):
+        red, green, blue, alpha = to_rgba(facecolor)
+        if alpha > 0.0:
+            return 0.2126 * red + 0.7152 * green + 0.0722 * blue < 0.5
+    return False
 
 
 def frequency_to_slider_value(freq_hz: int | float) -> int:
@@ -2132,17 +2144,13 @@ class SpinoramaCanvas(RawCoordinatePlotCanvas):
         curves = state
         self._plot_state = state
         self._invalidate_crosshair_background()
-        colors = {
-            "On Axis": "#1f77b4",
-            "Listen. Wind.": "#2ca02c",
-            "Early Reflections": "#ff7f0e",
-            "Sound Power": "#d62728",
-            "PIR": "#9467bd",
-            "ERDI": "#8c564b",
-            "SPDI": "#17becf",
-        }
         spl_curves = curves.spl_curves()
         di_curves = curves.di_curves()
+        spl_colors, di_colors = spinorama_curve_colors(dark_background=plot_background_is_dark(self.axes))
+        colors = {
+            **{name: color for (name, _values), color in zip(spl_curves, spl_colors, strict=True)},
+            **{name: color for (name, _values), color in zip(di_curves, di_colors, strict=True)},
+        }
         labels = (tuple(name for name, _values in spl_curves), tuple(name for name, _values in di_curves))
         if labels != self._series_labels:
             for line in (*self._spl_lines.values(), *self._di_lines.values()):
@@ -2186,8 +2194,10 @@ class SpinoramaCanvas(RawCoordinatePlotCanvas):
 
         for name, values in spl_curves:
             self._spl_lines[name].set_data(curves.freq_hz, values)
+            self._spl_lines[name].set_color(colors[name])
         for name, values in di_curves:
             self._di_lines[name].set_data(curves.freq_hz, values)
+            self._di_lines[name].set_color(colors[name])
 
         self.axes.set_ylim(*SPINORAMA_SPL_LIMITS)
         self.di_axes.set_ylim(*SPINORAMA_DI_LIMITS)
