@@ -10,6 +10,7 @@ from matplotlib.ticker import AutoMinorLocator, LogLocator, MaxNLocator
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu
 
+from blab.ui.marker_readout import MarkerReadoutCurve
 from blab.ui.plots import (
     DUAL_AXIS_LAYOUT,
     GRID_LINE_ALPHA,
@@ -214,6 +215,14 @@ class ElectricalImpedanceCanvas(RawCoordinatePlotCanvas):
             any_phase_visible = any_phase_visible or phase_visible
         self.phase_axes.set_visible(any_phase_visible)
         self._show_series_legend((label, self._magnitude_lines[label]) for label in self._series_labels)
+
+    def _marker_readout_curves(self) -> tuple[MarkerReadoutCurve, ...]:
+        magnitude = super()._marker_readout_curves()
+        phase = tuple(
+            MarkerReadoutCurve(f"{label} phase", self._phase_lines[label], period=360.0)
+            for label in self._series_labels
+        )
+        return (*magnitude, *phase)
 
     def _update_magnitude_limits(self) -> None:
         finite_rows = []

@@ -20,6 +20,12 @@ from PySide6.QtWidgets import QMenu
 from blab.plotting import VisualizerConfig
 from blab.spinorama import SpinoramaCurves, compute_spinorama_from_planes, spinorama_curve_colors
 from blab.ui.iec_scale_canvas import IecScaleCanvasMixin
+from blab.ui.marker_readout import (
+    MarkerReadoutBox,
+    MarkerReadoutCurve,
+    MarkerReadoutRow,
+    interpolate_log_frequency,
+)
 from blab.ui.series_visibility import SeriesVisibilityMixin
 
 AUDIO_FREQ_MIN_HZ = 20
@@ -1293,7 +1299,34 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
         self._crosshair_freq_label = None
         self._crosshair_y_label = None
         self._crosshair_secondary_label = None
+        self._marker_readout_box = MarkerReadoutBox(fontsize=PLOT_LEGEND_SIZE)
         super().__init__(figure, title)
+
+    def _marker_readout_curves(self) -> tuple[MarkerReadoutCurve, ...]:
+        """Curves listed at the Marker: by default every legend entry, in legend order."""
+        return tuple(
+            MarkerReadoutCurve(str(line.get_label()), line)
+            for _series, line in getattr(self, "_series_legend_entries", ())
+        )
+
+    def _update_marker_readout(self, freq_hz: float | None) -> tuple[object, ...]:
+        if freq_hz is None:
+            self._marker_readout_box.hide()
+            return ()
+        rows = []
+        for curve in self._marker_readout_curves():
+            line = curve.line
+            if not line.get_visible() or line.axes is None or not line.axes.get_visible():
+                continue
+            value = interpolate_log_frequency(line.get_xdata(), line.get_ydata(), freq_hz, period=curve.period)
+            if value is None:
+                continue
+            text = (
+                self._format_crosshair_y(value) if line.axes is self.axes else self._format_secondary_crosshair_y(value)
+            )
+            rows.append(MarkerReadoutRow(curve.label, line.get_color(), text, line.get_linestyle()))
+        axes_x = self.axes.transAxes.inverted().transform(self.axes.transData.transform((freq_hz, 0.0)))[0]
+        return self._marker_readout_box.update(self.axes, rows, marker_axes_x=float(axes_x))
 
     def _interactive_axes(self) -> tuple[object, ...]:
         if self.secondary_axes is None:
@@ -1923,6 +1956,14 @@ class OnAxisResponseCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
             any_phase_visible = any_phase_visible or phase_visible
         self.phase_axes.set_visible(any_phase_visible)
         self._show_series_legend((label, self._magnitude_lines[label]) for label in self._series_labels)
+
+    def _marker_readout_curves(self) -> tuple[MarkerReadoutCurve, ...]:
+        magnitude = super()._marker_readout_curves()
+        phase = tuple(
+            MarkerReadoutCurve(f"{label} phase", self._phase_lines[label], period=360.0)
+            for label in self._series_labels
+        )
+        return (*magnitude, *phase)
 
     def _update_magnitude_limits(self) -> None:
         finite_rows = []
