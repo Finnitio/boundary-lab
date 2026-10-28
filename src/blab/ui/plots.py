@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,7 +46,10 @@ ISOBAR_COLORBAR_GAP_PT = 7.0
 ISOBAR_COLORBAR_WIDTH_PT = 10.0
 ON_AXIS_DB_SPAN = 50.0
 SPINORAMA_SPL_LIMITS = (-40.0, 10.0)
-SPINORAMA_DI_LIMITS = (-5.0, 45.0)
+SPINORAMA_DB_SPAN = 50.0
+SPINORAMA_GRID_STEP_DB = 10.0
+# DI axis with no negative visible DI: DI 0 sits on the frequency axis.
+SPINORAMA_DI_LIMITS = (0.0, SPINORAMA_DB_SPAN)
 # Legend baseline, in figure coordinates. Axes-relative placement scales with
 # the axes height and falls off short panels.
 SPINORAMA_LEGEND_BOTTOM = 0.006
@@ -95,6 +99,23 @@ SINGLE_AXIS_LAYOUT = PlotLayoutProfile(left_pt=52.0, right_pt=14.0)
 DUAL_AXIS_LAYOUT = PlotLayoutProfile(left_pt=52.0, right_pt=52.0)
 ISOBAR_LAYOUT = PlotLayoutProfile(left_pt=50.0, right_pt=58.0)
 SPINORAMA_LAYOUT = PlotLayoutProfile(left_pt=52.0, right_pt=52.0, bottom_pt=58.0)
+
+
+def spinorama_di_limits(visible_di_db: Iterable[np.ndarray]) -> tuple[float, float]:
+    """DI axis limits with DI 0 on the frequency axis or on a major gridline.
+
+    The span matches the SPL axis, so both axes share gridlines. The lower limit
+    is 0 unless a finite visible DI value is negative; then it is the next
+    multiple of the grid step at or below the minimum.
+    """
+    minimum = 0.0
+    for values in visible_di_db:
+        finite = np.asarray(values, dtype=float)
+        finite = finite[np.isfinite(finite)]
+        if finite.size:
+            minimum = min(minimum, float(finite.min()))
+    lower = float(np.floor(minimum / SPINORAMA_GRID_STEP_DB) * SPINORAMA_GRID_STEP_DB) + 0.0
+    return lower, lower + SPINORAMA_DB_SPAN
 
 
 def apply_figure_layout(figure: Figure, profile: PlotLayoutProfile) -> None:
@@ -2019,6 +2040,8 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self.axes.set_ylabel("SPL (dB)")
         self.di_axes.set_ylabel("DI (dB)")
         apply_audio_frequency_axis(self.axes)
+        for axes in (self.axes, self.di_axes):
+            axes.yaxis.set_major_locator(MultipleLocator(SPINORAMA_GRID_STEP_DB))
         self.axes.set_ylim(*SPINORAMA_SPL_LIMITS)
         self.di_axes.set_ylim(*SPINORAMA_DI_LIMITS)
         self.axes.grid(which="major", color="#808080", linewidth=0.8, alpha=GRID_LINE_ALPHA)
@@ -2047,6 +2070,11 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
             handlelength=1.6,
             handletextpad=0.5,
         )
+
+    def _update_visible_series_limits(self) -> None:
+        # Manual limits cover only the SPL axis; the DI rule always applies.
+        visible_di = (line.get_ydata() for name, line in self._di_lines.items() if self.is_series_visible(name))
+        self.di_axes.set_ylim(*spinorama_di_limits(visible_di))
 
     def _format_crosshair_y(self, value: float) -> str:
         return f"{value:.1f} dB SPL"
@@ -2147,7 +2175,7 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self._apply_series_visibility()
 
         self.axes.set_ylim(*SPINORAMA_SPL_LIMITS)
-        self.di_axes.set_ylim(*SPINORAMA_DI_LIMITS)
+        self._update_visible_series_limits()
         self._apply_manual_axis_limits()
 
         apply_compact_plot_text(self.axes)
