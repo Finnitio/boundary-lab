@@ -1372,6 +1372,7 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
                 self._format_crosshair_y(value) if line.axes is self.axes else self._format_secondary_crosshair_y(value)
             )
             rows.append(MarkerReadoutRow(curve.label, line.get_color(), text, line.get_linestyle()))
+        rows.append(MarkerReadoutRow("Frequency", "none", format_plot_frequency(freq_hz), "None"))
         display_x = self.axes.transData.transform((self.frequency_to_axis_x(freq_hz), 0.0))
         axes_x = self.axes.transAxes.inverted().transform(display_x)[0]
         return self._marker_readout_box.update(self.axes, rows, marker_axes_x=float(axes_x))

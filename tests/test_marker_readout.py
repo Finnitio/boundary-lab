@@ -13,7 +13,7 @@ from blab.spinorama import SpinoramaCurves
 from blab.ui.electrical_impedance_plot import ElectricalImpedanceCanvas
 from blab.ui.marker_readout import interpolate_log_frequency
 from blab.ui.plot_marker import PlotMarker, PlotMarkerOverlay
-from blab.ui.plots import IsobarCanvas, OnAxisResponseCanvas, SpinoramaCanvas
+from blab.ui.plots import IsobarCanvas, OnAxisResponseCanvas, SpinoramaCanvas, format_plot_frequency
 
 _APP = QApplication.instance() or QApplication([])
 _FREQS = np.asarray([100.0, 1000.0, 10000.0], dtype=np.float32)
@@ -140,7 +140,7 @@ def _click(canvas, freq_hz: float) -> None:
     MouseEvent("button_release_event", canvas, x, y, MouseButton.LEFT)._process()
 
 
-def _readout(canvas) -> dict[str, tuple[str, str]] | None:
+def _readout(canvas) -> dict[str, tuple[str, str | None]] | None:
     """Visible readout rows as {curve: (value text, swatch colour)}."""
     boxes = [artist for artist in canvas.axes.get_children() if artist.get_gid() == "plot_marker_readout"]
     if not boxes or not boxes[0].get_visible():
@@ -148,8 +148,16 @@ def _readout(canvas) -> dict[str, tuple[str, str]] | None:
     rows = {}
     for handle, text in zip(boxes[0].legend_handles, boxes[0].get_texts(), strict=True):
         label, value = text.get_text().split(": ", 1)
-        rows[label] = (value, to_hex(handle.get_color()))
+        color = None if handle.get_linestyle() == "None" else to_hex(handle.get_color())
+        rows[label] = (value, color)
     return rows
+
+
+def _readout_legend(canvas):
+    boxes = [artist for artist in canvas.axes.get_children() if artist.get_gid() == "plot_marker_readout"]
+    if not boxes or not boxes[0].get_visible():
+        return None
+    return boxes[0]
 
 
 def _sum_spl(freq_hz: float) -> str:
@@ -167,7 +175,44 @@ def test_curve_plot_lists_each_visible_curve_with_swatch_and_interpolated_value(
     assert rows == {
         "Sum": (_sum_spl(marked.marker.frequency_hz), "#000000"),
         "Woofer": ("70.0 dB", woofer_color),
+        "Frequency": (format_plot_frequency(marked.marker.frequency_hz), None),
     }
+
+
+def test_curve_readout_ends_with_frequency_without_swatch_and_replaces_axis_label(marked) -> None:
+    canvas = marked(_on_axis_canvas)
+    marked.marker.action.setChecked(True)
+
+    _hover(canvas, 1250.0)
+
+    legend = _readout_legend(canvas)
+    assert [text.get_text() for text in legend.get_texts()] == [
+        f"Sum: {_sum_spl(marked.marker.frequency_hz)}",
+        "Woofer: 70.0 dB",
+        f"Frequency: {format_plot_frequency(marked.marker.frequency_hz)}",
+    ]
+    assert legend.legend_handles[-1].get_linestyle() == "None"
+    canvas.draw()
+    text_lefts = [text.get_window_extent(canvas.get_renderer()).x0 for text in legend.get_texts()]
+    assert text_lefts == pytest.approx([text_lefts[0]] * len(text_lefts))
+    marker_labels = [artist for artist in canvas.axes.get_children() if artist.get_gid() == "plot_marker_label"]
+    assert marker_labels and not marker_labels[0].get_visible()
+
+    canvas.set_series_visible("Sum", False)
+    canvas.set_series_visible("Woofer", False)
+    canvas.draw()
+    legend = _readout_legend(canvas)
+    assert [text.get_text() for text in legend.get_texts()] == [
+        f"Frequency: {format_plot_frequency(marked.marker.frequency_hz)}"
+    ]
+
+    _click(canvas, 2000.0)
+    locked_frequency = marked.marker.frequency_hz
+    _hover(canvas, 5000.0)
+    assert marked.marker.frequency_hz == locked_frequency
+    assert [text.get_text() for text in _readout_legend(canvas).get_texts()] == [
+        f"Frequency: {format_plot_frequency(locked_frequency)}"
+    ]
 
 
 def test_readout_follows_the_marker_and_holds_while_locked(marked) -> None:
@@ -192,18 +237,18 @@ def test_hiding_a_curve_removes_it_from_the_readout_and_showing_restores_it(mark
 
     canvas.set_series_visible("Woofer", False)
     canvas.draw()
-    assert set(_readout(canvas)) == {"Sum"}
+    assert set(_readout(canvas)) == {"Sum", "Frequency"}
 
     canvas.set_series_visible("Woofer", True)
     canvas.draw()
-    assert set(_readout(canvas)) == {"Sum", "Woofer"}
+    assert set(_readout(canvas)) == {"Sum", "Woofer", "Frequency"}
 
 
 def test_phase_traces_are_listed_in_degrees_only_when_shown(marked) -> None:
     canvas = marked(_on_axis_canvas)
     marked.marker.action.setChecked(True)
     _hover(canvas, 300.0)
-    assert set(_readout(canvas)) == {"Sum", "Woofer"}
+    assert set(_readout(canvas)) == {"Sum", "Woofer", "Frequency"}
 
     canvas.show_phase_action.setChecked(True)
     canvas.draw()
@@ -248,6 +293,7 @@ def test_electrical_impedance_lists_magnitude_and_phase_units(marked) -> None:
     assert {label: value for label, (value, _color) in _readout(canvas).items()} == {
         "LF": "8 Ω",
         "LF phase": "45.0°",
+        "Frequency": format_plot_frequency(marked.marker.frequency_hz),
     }
 
 
