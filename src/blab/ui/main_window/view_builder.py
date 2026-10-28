@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from blab.ui.activity import ActivityStatusBar
 from blab.ui.application_state import OperationPhase
+from blab.ui.dock_drag import PanelDockController
 from blab.ui.error_dialog import ErrorDialog
 from blab.ui.main_window.workflow_view import (
     FrequencyRange,
@@ -318,6 +319,10 @@ class ViewBuilderMixin:
                 dock.visibilityChanged.connect(
                     lambda _visible, plot_id=entry.plot_id: self._sync_plot_view_action(plot_id)
                 )
+
+        self.panel_docking = PanelDockController(self.workspace)
+        for dock in (self.editor_dock, self.preview_dock, *self.plot_docks.values()):
+            self.panel_docking.register_panel(dock)
 
         controls = QFrame()
         controls_layout = QHBoxLayout(controls)
