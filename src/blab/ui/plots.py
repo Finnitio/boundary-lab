@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QMenu
 from blab.plotting import VisualizerConfig
 from blab.spinorama import SpinoramaCurves, compute_spinorama_from_planes, spinorama_curve_colors
 from blab.ui.iec_scale_canvas import IecScaleCanvasMixin
+from blab.ui.series_visibility import SeriesVisibilityMixin
 
 AUDIO_FREQ_MIN_HZ = 20
 AUDIO_FREQ_MAX_HZ = 20000
@@ -48,6 +49,8 @@ SPINORAMA_DI_LIMITS = (-5.0, 45.0)
 # Legend baseline, in figure coordinates. Axes-relative placement scales with
 # the axes height and falls off short panels.
 SPINORAMA_LEGEND_BOTTOM = 0.006
+# Spinorama series renamed by Spherical Spin share one visibility key.
+SPINORAMA_SERIES_KEY_ALIASES = {"Spherical DI": "SPDI"}
 ISOBAR_CROSSHAIR_COLOR = "#101214"
 ISOBAR_CROSSHAIR_LABEL_FACE = "#f8fbff"
 ISOBAR_CROSSHAIR_LABEL_EDGE = "#2868ff"
@@ -222,18 +225,10 @@ def _grid_bracket(values: np.ndarray, target: float) -> tuple[int, int, float]:
     return left, right, float(np.clip(fraction, 0.0, 1.0))
 
 
-class InteractivePlotCanvas(FigureCanvas):
+class InteractivePlotCanvas(SeriesVisibilityMixin, FigureCanvas):
     """Shared mouse lifecycle for plot crosshairs and solve comparisons."""
 
     trace_visibility_changed = Signal()
-
-    def is_series_visible(self, label: str) -> bool:
-        """Return the trace-menu selection, including traces not rendered yet."""
-        return getattr(self, "_series_visibility", {}).get(str(label), True)
-
-    def has_selected_traces(self) -> bool:
-        labels = getattr(self, "_series_labels", ())
-        return not labels or any(self.is_series_visible(label) for label in labels)
 
     def _set_plot_title(self, title: str, **kwargs) -> None:
         self.axes.set_title(title, **kwargs)
@@ -414,6 +409,7 @@ class InteractivePlotCanvas(FigureCanvas):
         self.mpl_connect("button_press_event", self._on_comparison_button_press)
         self.mpl_connect("button_release_event", self._on_comparison_button_release)
         self.mpl_connect("figure_leave_event", self._on_figure_leave)
+        self.mpl_connect("pick_event", self._on_series_legend_pick)
 
     def _interactive_axes(self) -> tuple[object, ...]:
         return (self.axes,)
@@ -488,6 +484,8 @@ class InteractivePlotCanvas(FigureCanvas):
         if self._marker_hides_crosshair():
             return
         if not self._event_is_in_plot(event) or event.button != MouseButton.LEFT:
+            return
+        if self._event_hits_series_legend(event):
             return
         if getattr(event, "dblclick", False):
             self._hide_crosshair()
@@ -1589,46 +1587,17 @@ class ImpedanceCanvas(RawCoordinatePlotCanvas):
             self._redraw_crosshair()
         self.draw_idle()
 
-    def _sync_trace_filter_actions(self, labels: tuple[str, ...]) -> None:
-        self.trace_filter_menu.clear()
-        self._series_actions = {}
-        for label in labels:
-            action = self.trace_filter_menu.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(self._series_visibility.get(label, True))
-            action.toggled.connect(lambda checked, series_label=label: self.set_series_visible(series_label, checked))
-            self._series_actions[label] = action
-        self.trace_filter_action.setEnabled(bool(labels))
-
-    def set_series_visible(self, label: str, visible: bool) -> None:
-        if label not in self._series_labels:
-            return
-        self._series_visibility[label] = bool(visible)
-        self.trace_visibility_changed.emit()
-        self._apply_series_visibility()
+    def _update_visible_series_limits(self) -> None:
         self._update_y_limits()
-        self._apply_manual_axis_limits()
-        self._invalidate_crosshair_background()
-        self.draw_idle()
 
     def _apply_series_visibility(self) -> None:
-        visible_lines = []
+        entries = []
         for index, label in enumerate(self._series_labels):
-            visible = self._series_visibility.get(label, True)
-            pair = self._lines[index * 2 : index * 2 + 2]
-            for line in pair:
+            visible = self.is_series_visible(label)
+            for line in self._lines[index * 2 : index * 2 + 2]:
                 line.set_visible(visible)
-                if visible:
-                    visible_lines.append(line)
-        legend = self.axes.get_legend()
-        if legend is not None:
-            legend.remove()
-        if visible_lines:
-            self.axes.legend(
-                visible_lines,
-                [line.get_label() for line in visible_lines],
-                loc="best",
-            )
+                entries.append((label, line))
+        self._show_series_legend(entries)
 
     def _update_y_limits(self) -> None:
         finite_rows = []
@@ -1934,27 +1903,8 @@ class OnAxisResponseCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
             self._channel_colors[label] = cycle[(index - 1) % len(cycle)]
         return self._channel_colors[label]
 
-    def _sync_trace_filter_actions(self, labels: tuple[str, ...]) -> None:
-        self.trace_filter_menu.clear()
-        self._series_actions = {}
-        for label in labels:
-            action = self.trace_filter_menu.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(self._series_visibility.get(label, True))
-            action.toggled.connect(lambda checked, series_label=label: self.set_series_visible(series_label, checked))
-            self._series_actions[label] = action
-        self.trace_filter_action.setEnabled(bool(labels))
-
-    def set_series_visible(self, label: str, visible: bool) -> None:
-        if label not in self._series_labels:
-            return
-        self._series_visibility[label] = bool(visible)
-        self.trace_visibility_changed.emit()
-        self._apply_series_visibility()
+    def _update_visible_series_limits(self) -> None:
         self._update_magnitude_limits()
-        self._apply_manual_axis_limits()
-        self._invalidate_crosshair_background()
-        self.draw_idle()
 
     def _set_phase_visible(self, _visible: bool) -> None:
         self._apply_series_visibility()
@@ -1965,24 +1915,14 @@ class OnAxisResponseCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         show_phase = self.show_phase_action.isChecked() and self._phase_available
         any_phase_visible = False
         for label in self._series_labels:
-            visible = self._series_visibility.get(label, True)
+            visible = self.is_series_visible(label)
             self._magnitude_lines[label].set_visible(visible)
             phase_line = self._phase_lines[label]
             phase_visible = visible and show_phase and np.asarray(phase_line.get_ydata()).size > 0
             phase_line.set_visible(phase_visible)
             any_phase_visible = any_phase_visible or phase_visible
         self.phase_axes.set_visible(any_phase_visible)
-        self._refresh_magnitude_legend()
-
-    def _refresh_magnitude_legend(self) -> None:
-        legend = self.axes.get_legend()
-        if legend is not None:
-            legend.remove()
-        visible_lines = [
-            self._magnitude_lines[label] for label in self._series_labels if self._series_visibility.get(label, True)
-        ]
-        if visible_lines:
-            self.axes.legend(visible_lines, [line.get_label() for line in visible_lines], loc="best")
+        self._show_series_legend((label, self._magnitude_lines[label]) for label in self._series_labels)
 
     def _update_magnitude_limits(self) -> None:
         finite_rows = []
@@ -2044,7 +1984,8 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self.di_axes = self.axes.twinx()
         self._spl_lines: dict[str, object] = {}
         self._di_lines: dict[str, object] = {}
-        self._series_labels: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
+        self._series_labels: tuple[str, ...] = ()
+        self._series_visibility: dict[str, bool] = {}
         self._plot_state = None
         super().__init__(self.figure, "Spinorama", secondary_axes=self.di_axes)
         self.set_layout_profile(SPINORAMA_LAYOUT)
@@ -2055,10 +1996,14 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self.di_axes.yaxis.set_label_position("right")
         self.di_axes.yaxis.tick_right()
 
+    def _series_visibility_key(self, label: str) -> str:
+        # Sound-power DI keeps its hidden state when Spherical Spin renames it.
+        return SPINORAMA_SERIES_KEY_ALIASES.get(str(label), str(label))
+
     def _reset_plot_data(self) -> None:
         self._spl_lines = {}
         self._di_lines = {}
-        self._series_labels = ((), ())
+        self._series_labels = ()
         self._plot_state = None
         self._reset_crosshair_artists()
         self._reset_comparison_interaction()
@@ -2082,6 +2027,26 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self._apply_manual_axis_limits()
         self._redraw_crosshair()
         self.draw_idle()
+
+    def _apply_series_visibility(self) -> None:
+        lines = {**self._spl_lines, **self._di_lines}
+        for name, line in lines.items():
+            line.set_visible(self.is_series_visible(name))
+        self._show_series_legend(
+            lines.items(),
+            loc="lower center",
+            bbox_to_anchor=(0.5, SPINORAMA_LEGEND_BOTTOM),
+            bbox_transform=self.figure.transFigure,
+            ncols=4,
+            borderaxespad=0.0,
+            frameon=False,
+            # Two rows in a fixed-fraction margin; tight spacing suits
+            # short panels.
+            borderpad=0.0,
+            labelspacing=0.25,
+            handlelength=1.6,
+            handletextpad=0.5,
+        )
 
     def _format_crosshair_y(self, value: float) -> str:
         return f"{value:.1f} dB SPL"
@@ -2152,7 +2117,7 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
             **{name: color for (name, _values), color in zip(spl_curves, spl_colors, strict=True)},
             **{name: color for (name, _values), color in zip(di_curves, di_colors, strict=True)},
         }
-        labels = (tuple(name for name, _values in spl_curves), tuple(name for name, _values in di_curves))
+        labels = tuple(name for name, _values in (*spl_curves, *di_curves))
         if labels != self._series_labels:
             for line in (*self._spl_lines.values(), *self._di_lines.values()):
                 line.remove()
@@ -2171,26 +2136,6 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
                 )[0]
                 for name, _values in di_curves
             }
-            legend = self.axes.get_legend()
-            if legend is not None:
-                legend.remove()
-            lines = [*self._spl_lines.values(), *self._di_lines.values()]
-            self.axes.legend(
-                lines,
-                [*labels[0], *labels[1]],
-                loc="lower center",
-                bbox_to_anchor=(0.5, SPINORAMA_LEGEND_BOTTOM),
-                bbox_transform=self.figure.transFigure,
-                ncols=4,
-                borderaxespad=0.0,
-                frameon=False,
-                # Two rows in a fixed-fraction margin; tight spacing suits
-                # short panels.
-                borderpad=0.0,
-                labelspacing=0.25,
-                handlelength=1.6,
-                handletextpad=0.5,
-            )
             self._series_labels = labels
 
         for name, values in spl_curves:
@@ -2199,6 +2144,7 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         for name, values in di_curves:
             self._di_lines[name].set_data(curves.freq_hz, values)
             self._di_lines[name].set_color(colors[name])
+        self._apply_series_visibility()
 
         self.axes.set_ylim(*SPINORAMA_SPL_LIMITS)
         self.di_axes.set_ylim(*SPINORAMA_DI_LIMITS)

@@ -124,6 +124,8 @@ class PlotMarkerOverlay:
     def _on_press(self, event) -> None:
         if not self._marker.enabled or event.button != MouseButton.LEFT:
             return
+        if self._canvas._event_hits_series_legend(event):
+            return
         freq_hz = self._event_frequency(event)
         if freq_hz is not None:
             self._marker.click(freq_hz)

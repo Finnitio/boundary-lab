@@ -142,37 +142,13 @@ class MaxSplCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
             self._redraw_crosshair()
         self.draw_idle()
 
-    def _sync_trace_filter_actions(self, labels: tuple[str, ...]) -> None:
-        self.trace_filter_menu.clear()
-        self._series_actions = {}
-        for label in labels:
-            action = self.trace_filter_menu.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(self._series_visibility.get(label, True))
-            action.toggled.connect(lambda checked, series_label=label: self.set_series_visible(series_label, checked))
-            self._series_actions[label] = action
-        self.trace_filter_action.setEnabled(bool(labels))
-
-    def set_series_visible(self, label: str, visible: bool) -> None:
-        if label not in self._series_labels:
-            return
-        self._series_visibility[label] = bool(visible)
-        self.trace_visibility_changed.emit()
-        self._apply_series_visibility()
-        self._update_y_limits()
-        self._apply_manual_axis_limits()
-        self._invalidate_crosshair_background()
-        self.draw_idle()
-
     def _apply_series_visibility(self) -> None:
         for label, line in self._lines.items():
-            line.set_visible(self._series_visibility.get(label, True))
-        legend = self.axes.get_legend()
-        if legend is not None:
-            legend.remove()
-        visible = [line for line in self._lines.values() if line.get_visible()]
-        if visible:
-            self.axes.legend(visible, [line.get_label() for line in visible], loc="best")
+            line.set_visible(self.is_series_visible(label))
+        self._show_series_legend(self._lines.items())
+
+    def _update_visible_series_limits(self) -> None:
+        self._update_y_limits()
 
     def _update_y_limits(self) -> None:
         finite_rows = []
