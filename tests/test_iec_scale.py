@@ -161,7 +161,7 @@ def test_box_is_centred_in_the_adaptive_area_with_decorations_outside(iec_canvas
     if secondary is not None and secondary.get_visible():
         decorations += [*secondary.get_yticklabels(), secondary.yaxis.label]
     legend = iec_canvas.axes.get_legend()
-    if legend is not None and legend.get_visible() and isinstance(iec_canvas, SpinoramaCanvas):
+    if legend is not None and legend.get_visible():
         decorations.append(legend)
     for artist in decorations:
         if not artist.get_visible() or not getattr(artist, "get_text", lambda: "x")():
@@ -170,6 +170,25 @@ def test_box_is_centred_in_the_adaptive_area_with_decorations_outside(iec_canvas
         overlap_w = min(extent.x1, axes_box.x1) - max(extent.x0, axes_box.x0)
         overlap_h = min(extent.y1, axes_box.y1) - max(extent.y0, axes_box.y0)
         assert overlap_w <= 1.0 or overlap_h <= 1.0, artist
+
+
+@pytest.mark.parametrize("factory", [_on_axis, _max_spl], ids=["on_axis", "max_spl"])
+def test_generic_legend_stays_outside_the_iec_axes_box(factory) -> None:
+    canvas = _shown(factory())
+    try:
+        canvas.iec_scale_action.setChecked(True)
+        canvas.figure.canvas.draw()
+
+        renderer = canvas.figure.canvas.get_renderer()
+        axes_box = canvas.axes.get_window_extent(renderer)
+        legend_box = canvas.axes.get_legend().get_window_extent(renderer)
+        overlap_width = min(legend_box.x1, axes_box.x1) - max(legend_box.x0, axes_box.x0)
+        overlap_height = min(legend_box.y1, axes_box.y1) - max(legend_box.y0, axes_box.y0)
+
+        assert overlap_width <= 1.0 or overlap_height <= 1.0
+    finally:
+        canvas.close()
+        canvas.deleteLater()
 
 
 def test_turning_the_toggle_off_restores_the_adaptive_layout(iec_canvas) -> None:

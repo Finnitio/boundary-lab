@@ -103,12 +103,18 @@ class SeriesVisibilityMixin:
         stays put while series are toggled.
         """
         entries = tuple(entries)
+        effective_kwargs = self._series_legend_kwargs()
+        effective_kwargs.update(legend_kwargs)
         legend = self.axes.get_legend()
         if legend is None or legend is not self._series_legend or entries != self._series_legend_entries:
             if legend is not None:
                 legend.remove()
-            self._build_series_legend(entries, legend_kwargs)
+            self._build_series_legend(entries, effective_kwargs)
         self._style_series_legend()
+
+    def _series_legend_kwargs(self) -> dict:
+        """Additional placement options supplied by canvas mixins."""
+        return {}
 
     def _build_series_legend(self, entries: Sequence[tuple[str, object]], legend_kwargs: dict) -> None:
         self._series_legend_entries = entries
