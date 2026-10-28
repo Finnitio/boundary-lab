@@ -23,6 +23,33 @@ DI_CURVE_NAMES = (
     "SPDI",
 )
 
+_ON_AXIS_LIGHT_BACKGROUND_COLOR = "#000000"
+_ON_AXIS_DARK_BACKGROUND_COLOR = "#ffffff"
+_LISTENING_WINDOW_COLOR = "#2ca02c"
+_EARLY_REFLECTIONS_COLOR = "#1f77b4"
+_SOUND_POWER_COLOR = "#d62728"
+_ESTIMATED_IN_ROOM_COLOR = "#e6b800"
+
+
+def spinorama_curve_colors(*, dark_background: bool = False) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return the conventional (SPL, DI) colours, positionally matching
+    ``SpinoramaCurves.spl_curves()`` and ``di_curves()``.
+
+    Colours follow curve identity, not display text, so the sound-power DI
+    keeps the Sound Power colour whether it is labelled SPDI or Spherical DI.
+    On Axis is black, or white when drawn on a dark background.
+    """
+    on_axis = _ON_AXIS_DARK_BACKGROUND_COLOR if dark_background else _ON_AXIS_LIGHT_BACKGROUND_COLOR
+    spl = (
+        on_axis,
+        _LISTENING_WINDOW_COLOR,
+        _EARLY_REFLECTIONS_COLOR,
+        _SOUND_POWER_COLOR,
+        _ESTIMATED_IN_ROOM_COLOR,
+    )
+    di = (_EARLY_REFLECTIONS_COLOR, _SOUND_POWER_COLOR)
+    return spl, di
+
 
 @dataclass(frozen=True)
 class SpinoramaCurves:
