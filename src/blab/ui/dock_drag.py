@@ -9,15 +9,18 @@ from PySide6.QtWidgets import QDockWidget, QMainWindow, QWidget
 from blab.ui.dock_targets import (
     CompassPosition,
     Edge,
+    EqualiseAxis,
     PanelDropTarget,
     Point,
     Rect,
+    aligned_layout_members,
     compass_target_rects,
     edge_target_rects,
     panel_preview_rect,
     panel_under_cursor,
     preview_rect,
     resolve_drop_target,
+    top_level_layout_members,
 )
 
 
@@ -222,7 +225,7 @@ class PanelDockController:
             return
         position = target.position
         if position == CompassPosition.CENTER:
-            panel.setFloating(False)
+            self.workspace.removeDockWidget(panel)
             self.workspace.addDockWidget(self.workspace.dockWidgetArea(target_panel), panel)
             self.workspace.tabifyDockWidget(target_panel, panel)
             panel.show()
@@ -231,23 +234,57 @@ class PanelDockController:
         if position is None:
             return
         orientation = Qt.Horizontal if position in (CompassPosition.LEFT, CompassPosition.RIGHT) else Qt.Vertical
+        axis = EqualiseAxis.HORIZONTAL if orientation == Qt.Horizontal else EqualiseAxis.VERTICAL
+        member_ids = aligned_layout_members(
+            self.docked_panel_rects(),
+            self._panel_id(target_panel),
+            axis,
+        )
+        target_tabs = self.workspace.tabifiedDockWidgets(target_panel)
         panel.setFloating(False)
         area = self.workspace.dockWidgetArea(target_panel)
-        self.workspace.addDockWidget(area, panel)
+        self.workspace.addDockWidget(area, panel, orientation)
         if position in (CompassPosition.LEFT, CompassPosition.TOP):
             self.workspace.splitDockWidget(panel, target_panel, orientation)
         else:
             self.workspace.splitDockWidget(target_panel, panel, orientation)
+        if target_tabs:
+            self.workspace.tabifyDockWidget(target_tabs[0], target_panel)
         panel.show()
+        members = [
+            candidate
+            for panel_id in member_ids
+            for candidate in self._panels
+            if self._panel_id(candidate) == panel_id and candidate is not panel
+        ]
+        self.workspace.resizeDocks([*members, panel], [1] * (len(members) + 1), orientation)
+        target_panel.raise_()
 
     def _drop_at_edge(self, panel: QDockWidget, edge: Edge) -> None:
+        orientation = Qt.Horizontal if edge in (Edge.LEFT, Edge.RIGHT) else Qt.Vertical
+        axis = EqualiseAxis.HORIZONTAL if orientation == Qt.Horizontal else EqualiseAxis.VERTICAL
+        panel_rects = self.docked_panel_rects()
+        panel_rects.pop(self._panel_id(panel), None)
+        member_ids = top_level_layout_members(panel_rects, axis)
         area = self._DOCK_AREAS[edge]
         panel.setFloating(False)
         self.workspace.removeDockWidget(panel)
         for corner in self._EDGE_CORNERS[edge]:
             self.workspace.setCorner(corner, area)
-        self.workspace.addDockWidget(area, panel)
+        self.workspace.addDockWidget(area, panel, orientation)
         panel.show()
+        self.workspace.layout().activate()
+        members = [
+            candidate
+            for panel_id in member_ids
+            for candidate in self._panels
+            if self._panel_id(candidate) == panel_id and candidate is not panel
+        ]
+        size = (
+            self.workspace.width() if orientation == Qt.Horizontal else self.workspace.height()
+        ) // (len(members) + 1)
+        for member in [*members, panel]:
+            self.workspace.resizeDocks([member], [size], orientation)
 
 
 __all__ = ["PanelDockController", "PanelDropOverlay"]

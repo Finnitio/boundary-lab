@@ -12,11 +12,14 @@ from blab.ui.dock_drag import PanelDockController
 from blab.ui.dock_targets import (
     CompassPosition,
     Edge,
+    EqualiseAxis,
     PanelDropTarget,
     Point,
     Rect,
+    aligned_layout_members,
     resolve_drop_target,
     resolve_outer_edge_target,
+    top_level_layout_members,
 )
 from blab.ui.main_window_widgets import DockTitleBar
 
@@ -70,6 +73,39 @@ def test_outer_edge_precedes_compass_and_dragged_group_is_not_a_target() -> None
             excluded_panel_ids={"dragged", "dragged-tab"},
         )
         is None
+    )
+
+
+def test_equalisation_members_are_the_logical_groups_aligned_with_the_drop() -> None:
+    panels = {
+        "generator": Rect(0, 0, 200, 600),
+        "plot-a": Rect(200, 0, 350, 300),
+        "plot-a-tab": Rect(200, 0, 350, 300),
+        "plot-b": Rect(550, 0, 350, 300),
+        "lower-plot": Rect(200, 300, 350, 300),
+    }
+
+    assert aligned_layout_members(panels, "plot-a", EqualiseAxis.HORIZONTAL) == (
+        "plot-a",
+        "plot-b",
+    )
+    assert aligned_layout_members(panels, "plot-a", EqualiseAxis.VERTICAL) == (
+        "plot-a",
+        "lower-plot",
+    )
+
+
+def test_outer_edge_members_collapse_panels_and_tabs_in_the_same_column() -> None:
+    panels = {
+        "generator": Rect(0, 0, 200, 600),
+        "top-plot": Rect(200, 0, 700, 300),
+        "top-plot-tab": Rect(200, 0, 700, 300),
+        "bottom-plot": Rect(200, 300, 700, 300),
+    }
+
+    assert top_level_layout_members(panels, EqualiseAxis.HORIZONTAL) == (
+        "generator",
+        "top-plot",
     )
 
 
@@ -141,6 +177,81 @@ def test_public_drop_entry_point_places_panel_on_each_side(qapp) -> None:
     workspace.deleteLater()
 
 
+def test_side_drop_equalises_three_members_in_the_affected_row(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    first = QDockWidget("First", workspace)
+    first.setObjectName("first")
+    first.setWidget(QWidget())
+    second = QDockWidget("Second", workspace)
+    second.setObjectName("second")
+    second.setWidget(QWidget())
+    moved = QDockWidget("Moved", workspace)
+    moved.setObjectName("moved")
+    moved.setWidget(QWidget())
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, first)
+    workspace.splitDockWidget(first, second, Qt.Horizontal)
+    workspace.addDockWidget(Qt.BottomDockWidgetArea, moved)
+    controller = PanelDockController(workspace)
+    for panel in (first, second, moved):
+        controller.register_panel(panel)
+    workspace.show()
+    qapp.processEvents()
+    workspace.resizeDocks([first, second], [600, 300], Qt.Horizontal)
+    qapp.processEvents()
+
+    controller.drop_panel(moved, PanelDropTarget.panel("second", CompassPosition.RIGHT))
+    qapp.processEvents()
+
+    widths = [first.width(), second.width(), moved.width()]
+    assert max(widths) - min(widths) <= 2
+
+    workspace.resizeDocks([first, second, moved], [450, 300, 150], Qt.Horizontal)
+    qapp.processEvents()
+    user_widths = [first.width(), second.width(), moved.width()]
+    qapp.processEvents()
+    assert first.width() > second.width() > moved.width()
+    assert [first.width(), second.width(), moved.width()] == user_widths
+
+    workspace.close()
+    workspace.deleteLater()
+
+
+def test_bottom_side_drop_equalises_heights_without_resizing_outside_column(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    generator = QDockWidget("Generator", workspace)
+    generator.setObjectName("generator")
+    generator.setWidget(QWidget())
+    target = QDockWidget("Target", workspace)
+    target.setObjectName("target")
+    target.setWidget(QWidget())
+    moved = QDockWidget("Moved", workspace)
+    moved.setObjectName("moved")
+    moved.setWidget(QWidget())
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, generator)
+    workspace.splitDockWidget(generator, target, Qt.Horizontal)
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = PanelDockController(workspace)
+    for panel in (generator, target, moved):
+        controller.register_panel(panel)
+    workspace.show()
+    qapp.processEvents()
+    workspace.resizeDocks([generator, target], [250, 650], Qt.Horizontal)
+    qapp.processEvents()
+    generator_width = generator.width()
+
+    controller.drop_panel(moved, PanelDropTarget.panel("target", CompassPosition.BOTTOM))
+    qapp.processEvents()
+
+    assert abs(target.height() - moved.height()) <= 2
+    assert abs(generator.width() - generator_width) <= 2
+
+    workspace.close()
+    workspace.deleteLater()
+
+
 def test_public_drop_entry_point_tabs_panel_with_target(qapp) -> None:
     workspace = QMainWindow()
     workspace.resize(900, 600)
@@ -162,6 +273,74 @@ def test_public_drop_entry_point_tabs_panel_with_target(qapp) -> None:
     qapp.processEvents()
 
     assert moved in workspace.tabifiedDockWidgets(target)
+
+    workspace.close()
+    workspace.deleteLater()
+
+
+def test_tab_group_counts_as_one_member_when_side_drop_is_equalised(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    first_tab = QDockWidget("First tab", workspace)
+    first_tab.setObjectName("first-tab")
+    first_tab.setWidget(QWidget())
+    active_tab = QDockWidget("Active tab", workspace)
+    active_tab.setObjectName("active-tab")
+    active_tab.setWidget(QWidget())
+    moved = QDockWidget("Moved", workspace)
+    moved.setObjectName("moved")
+    moved.setWidget(QWidget())
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, first_tab)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, active_tab)
+    workspace.tabifyDockWidget(first_tab, active_tab)
+    active_tab.raise_()
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = PanelDockController(workspace)
+    for panel in (first_tab, active_tab, moved):
+        controller.register_panel(panel)
+    workspace.show()
+    qapp.processEvents()
+
+    controller.drop_panel(moved, PanelDropTarget.panel("active-tab", CompassPosition.RIGHT))
+    qapp.processEvents()
+
+    assert first_tab in workspace.tabifiedDockWidgets(active_tab)
+    assert moved.width() >= workspace.width() * 0.45
+
+    workspace.close()
+    workspace.deleteLater()
+
+
+def test_tab_drop_does_not_equalise_existing_panel_sizes(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    generator = QDockWidget("Generator", workspace)
+    generator.setObjectName("generator")
+    generator.setWidget(QWidget())
+    target = QDockWidget("Target", workspace)
+    target.setObjectName("target")
+    target.setWidget(QWidget())
+    moved = QDockWidget("Moved", workspace)
+    moved.setObjectName("moved")
+    moved.setWidget(QWidget())
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, generator)
+    workspace.splitDockWidget(generator, target, Qt.Horizontal)
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = PanelDockController(workspace)
+    for panel in (generator, target, moved):
+        controller.register_panel(panel)
+    workspace.show()
+    qapp.processEvents()
+    workspace.resizeDocks([generator, target], [250, 650], Qt.Horizontal)
+    qapp.processEvents()
+    original_widths = (generator.width(), target.width())
+
+    controller.drop_panel(moved, PanelDropTarget.panel("target", CompassPosition.CENTER))
+    qapp.processEvents()
+
+    assert (generator.width(), target.width()) == original_widths
 
     workspace.close()
     workspace.deleteLater()
@@ -190,6 +369,65 @@ def test_side_edge_drop_is_outermost_and_spans_workspace_height(qapp) -> None:
     qapp.processEvents()
 
     assert moved.height() >= workspace.height() * 0.8
+
+    workspace.close()
+    workspace.deleteLater()
+
+
+def test_bottom_edge_drop_equalises_the_top_level_rows(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    existing = QDockWidget("Existing", workspace)
+    existing.setObjectName("existing")
+    existing.setWidget(QWidget())
+    moved = QDockWidget("Moved", workspace)
+    moved.setObjectName("moved")
+    moved.setWidget(QWidget())
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, existing)
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = PanelDockController(workspace)
+    controller.register_panel(existing)
+    controller.register_panel(moved)
+    workspace.show()
+    qapp.processEvents()
+
+    controller.drop_panel(moved, Edge.BOTTOM)
+    qapp.processEvents()
+
+    assert abs(existing.height() - moved.height()) <= 2
+
+    workspace.close()
+    workspace.deleteLater()
+
+
+def test_side_edge_drop_equalises_all_top_level_columns(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    first = QDockWidget("First", workspace)
+    first.setObjectName("first")
+    first.setWidget(QWidget())
+    second = QDockWidget("Second", workspace)
+    second.setObjectName("second")
+    second.setWidget(QWidget())
+    moved = QDockWidget("Moved", workspace)
+    moved.setObjectName("moved")
+    moved.setWidget(QWidget())
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, first)
+    workspace.splitDockWidget(first, second, Qt.Horizontal)
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = PanelDockController(workspace)
+    for panel in (first, second, moved):
+        controller.register_panel(panel)
+    workspace.show()
+    qapp.processEvents()
+
+    controller.drop_panel(moved, Edge.LEFT)
+    qapp.processEvents()
+
+    widths = [first.width(), second.width(), moved.width()]
+    assert max(widths) - min(widths) <= 2
 
     workspace.close()
     workspace.deleteLater()
