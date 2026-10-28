@@ -8,6 +8,7 @@ from matplotlib.ticker import LogLocator, MultipleLocator
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu
 
+from blab.ui.iec_scale_canvas import IecScaleCanvasMixin
 from blab.ui.plots import (
     GRID_LINE_ALPHA,
     MINOR_GRID_LINE_ALPHA,
@@ -21,7 +22,7 @@ from blab.ui.plots import (
 )
 
 
-class MaxSplCanvas(RawCoordinatePlotCanvas):
+class MaxSplCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
     """Plot isolated maximum-SPL magnitude for eligible channels."""
 
     def __init__(self) -> None:
