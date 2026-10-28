@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from enum import Enum
 
@@ -13,6 +14,33 @@ class Edge(Enum):
     RIGHT = "right"
     TOP = "top"
     BOTTOM = "bottom"
+
+
+class CompassPosition(Enum):
+    """A placement relative to one docked panel."""
+
+    LEFT = "left"
+    RIGHT = "right"
+    TOP = "top"
+    BOTTOM = "bottom"
+    CENTER = "center"
+
+
+@dataclass(frozen=True)
+class PanelDropTarget:
+    """One resolved outer-edge or panel-relative drop target."""
+
+    edge: Edge | None = None
+    panel_id: str | None = None
+    position: CompassPosition | None = None
+
+    @classmethod
+    def outer(cls, edge: Edge) -> PanelDropTarget:
+        return cls(edge=edge)
+
+    @classmethod
+    def panel(cls, panel_id: str, position: CompassPosition) -> PanelDropTarget:
+        return cls(panel_id=panel_id, position=position)
 
 
 @dataclass(frozen=True)
@@ -72,6 +100,56 @@ def resolve_outer_edge_target(
     return None
 
 
+def compass_target_rects(panel: Rect) -> dict[CompassPosition, Rect]:
+    """Return the five large targets centred over a panel."""
+    size = max(24, min(64, panel.width // 4, panel.height // 4))
+    centre_x = panel.x + panel.width // 2
+    centre_y = panel.y + panel.height // 2
+
+    def target(offset_x: int, offset_y: int) -> Rect:
+        return Rect(centre_x - size // 2 + offset_x, centre_y - size // 2 + offset_y, size, size)
+
+    return {
+        CompassPosition.LEFT: target(-size, 0),
+        CompassPosition.RIGHT: target(size, 0),
+        CompassPosition.TOP: target(0, -size),
+        CompassPosition.BOTTOM: target(0, size),
+        CompassPosition.CENTER: target(0, 0),
+    }
+
+
+def panel_under_cursor(
+    cursor: Point,
+    panel_rects: Mapping[str, Rect],
+    excluded_panel_ids: Collection[str] = (),
+) -> str | None:
+    """Return the eligible docked panel under ``cursor``."""
+    excluded = set(excluded_panel_ids)
+    for panel_id, panel_rect in panel_rects.items():
+        if panel_id not in excluded and panel_rect.contains(cursor):
+            return panel_id
+    return None
+
+
+def resolve_drop_target(
+    cursor: Point,
+    workspace: Rect,
+    panel_rects: Mapping[str, Rect],
+    excluded_panel_ids: Collection[str] = (),
+) -> PanelDropTarget | None:
+    """Resolve one target, giving workspace edges precedence over a compass."""
+    edge = resolve_outer_edge_target(cursor, workspace)
+    if edge is not None:
+        return PanelDropTarget.outer(edge)
+    panel_id = panel_under_cursor(cursor, panel_rects, excluded_panel_ids)
+    if panel_id is None:
+        return None
+    for position, target_rect in compass_target_rects(panel_rects[panel_id]).items():
+        if target_rect.contains(cursor):
+            return PanelDropTarget.panel(panel_id, position)
+    return None
+
+
 def preview_rect(workspace: Rect, edge: Edge) -> Rect:
     """Return the half-workspace preview for an edge drop."""
     if edge == Edge.LEFT:
@@ -85,4 +163,32 @@ def preview_rect(workspace: Rect, edge: Edge) -> Rect:
     return Rect(workspace.x, top, workspace.width, workspace.bottom - top)
 
 
-__all__ = ["Edge", "Point", "Rect", "edge_target_rects", "preview_rect", "resolve_outer_edge_target"]
+def panel_preview_rect(panel: Rect, position: CompassPosition) -> Rect:
+    """Return the area a panel-relative drop will occupy."""
+    if position == CompassPosition.LEFT:
+        return Rect(panel.x, panel.y, panel.width // 2, panel.height)
+    if position == CompassPosition.RIGHT:
+        left = panel.x + panel.width // 2
+        return Rect(left, panel.y, panel.right - left, panel.height)
+    if position == CompassPosition.TOP:
+        return Rect(panel.x, panel.y, panel.width, panel.height // 2)
+    if position == CompassPosition.BOTTOM:
+        top = panel.y + panel.height // 2
+        return Rect(panel.x, top, panel.width, panel.bottom - top)
+    return panel
+
+
+__all__ = [
+    "CompassPosition",
+    "Edge",
+    "PanelDropTarget",
+    "Point",
+    "Rect",
+    "compass_target_rects",
+    "edge_target_rects",
+    "panel_preview_rect",
+    "panel_under_cursor",
+    "preview_rect",
+    "resolve_drop_target",
+    "resolve_outer_edge_target",
+]
