@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QMenu
 
 from blab.plotting import VisualizerConfig
 from blab.spinorama import SpinoramaCurves, compute_spinorama_from_planes
+from blab.ui.iec_scale_canvas import IecScaleCanvasMixin
 
 AUDIO_FREQ_MIN_HZ = 20
 AUDIO_FREQ_MAX_HZ = 20000
@@ -1619,7 +1620,7 @@ class ImpedanceCanvas(RawCoordinatePlotCanvas):
         self.axes.set_ylim(minimum - padding, maximum + padding)
 
 
-class OnAxisResponseCanvas(RawCoordinatePlotCanvas):
+class OnAxisResponseCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
     def __init__(self):
         self.figure = Figure(figsize=(6.5, 3.0), dpi=100)
         self.axes = self.figure.add_subplot(111)
@@ -2006,7 +2007,7 @@ def _snapshot_spinorama_curves(curves: SpinoramaCurves) -> SpinoramaCurves:
     )
 
 
-class SpinoramaCanvas(RawCoordinatePlotCanvas):
+class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
     def __init__(self):
         self.figure = Figure(figsize=(6.5, 3.9), dpi=100)
         self.axes = self.figure.add_subplot(111)
