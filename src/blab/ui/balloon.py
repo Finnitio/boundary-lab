@@ -286,9 +286,10 @@ class BalloonPlotWindow(QMainWindow):
             [605, 345, 330, 380],
             Qt.Horizontal,
         )
-        self.panel_docking = PanelDockController(self.workspace)
-        for dock in (self.balloon_dock, self.radar_dock, self.wavefront_shape_dock, self.isobar_dock):
-            self.panel_docking.register_panel(dock)
+        self.panel_docking = PanelDockController(
+            self.workspace,
+            (self.balloon_dock, self.radar_dock, self.wavefront_shape_dock, self.isobar_dock),
+        )
         view_menu.addAction(self.balloon_dock.toggleViewAction())
         view_menu.addAction(self.radar_dock.toggleViewAction())
         view_menu.addAction(self.wavefront_shape_dock.toggleViewAction())

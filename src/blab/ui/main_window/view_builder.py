@@ -320,9 +320,10 @@ class ViewBuilderMixin:
                     lambda _visible, plot_id=entry.plot_id: self._sync_plot_view_action(plot_id)
                 )
 
-        self.panel_docking = PanelDockController(self.workspace)
-        for dock in (self.editor_dock, self.preview_dock, *self.plot_docks.values()):
-            self.panel_docking.register_panel(dock)
+        self.panel_docking = PanelDockController(
+            self.workspace,
+            (self.editor_dock, self.preview_dock, *self.plot_docks.values()),
+        )
 
         controls = QFrame()
         controls_layout = QHBoxLayout(controls)
