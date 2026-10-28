@@ -95,6 +95,20 @@ def test_equalisation_members_are_the_logical_groups_aligned_with_the_drop() -> 
     )
 
 
+def test_equalisation_uses_remaining_tab_as_group_representative() -> None:
+    panels = {
+        "dragged-tab": Rect(0, 0, 600, 600),
+        "remaining-tab": Rect(0, 0, 600, 600),
+        "target": Rect(600, 0, 300, 600),
+    }
+    panels.pop("dragged-tab")
+
+    assert aligned_layout_members(panels, "target", EqualiseAxis.HORIZONTAL) == (
+        "remaining-tab",
+        "target",
+    )
+
+
 def test_outer_edge_members_collapse_panels_and_tabs_in_the_same_column() -> None:
     panels = {
         "generator": Rect(0, 0, 200, 600),
@@ -212,6 +226,45 @@ def test_side_drop_equalises_three_members_in_the_affected_row(qapp) -> None:
     qapp.processEvents()
     assert first.width() > second.width() > moved.width()
     assert [first.width(), second.width(), moved.width()] == user_widths
+
+    workspace.close()
+    workspace.deleteLater()
+
+
+def test_dragging_registered_first_tab_into_same_row_equalises_remaining_group(qapp) -> None:
+    workspace = QMainWindow()
+    workspace.resize(900, 600)
+    dragged = QDockWidget("Dragged", workspace)
+    dragged.setObjectName("dragged")
+    dragged.setWidget(QWidget())
+    remaining_tab = QDockWidget("Remaining tab", workspace)
+    remaining_tab.setObjectName("remaining-tab")
+    remaining_tab.setWidget(QWidget())
+    target = QDockWidget("Target", workspace)
+    target.setObjectName("target")
+    target.setWidget(QWidget())
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, dragged)
+    workspace.splitDockWidget(dragged, target, Qt.Horizontal)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, remaining_tab)
+    workspace.tabifyDockWidget(dragged, remaining_tab)
+    dragged.raise_()
+    controller = PanelDockController(workspace)
+    for panel in (dragged, remaining_tab, target):
+        controller.register_panel(panel)
+    workspace.show()
+    qapp.processEvents()
+    workspace.resizeDocks([dragged, target], [600, 300], Qt.Horizontal)
+    qapp.processEvents()
+    # The offscreen plugin retains stale geometry for inactive tabs. Normalize
+    # the logical row so this exercises registration-order representative choice.
+    remaining_tab.setGeometry(dragged.geometry())
+    target.setGeometry(target.x(), dragged.y(), target.width(), dragged.height())
+
+    controller.drop_panel(dragged, PanelDropTarget.panel("target", CompassPosition.RIGHT))
+    qapp.processEvents()
+
+    widths = [remaining_tab.width(), target.width(), dragged.width()]
+    assert max(widths) - min(widths) <= 2
 
     workspace.close()
     workspace.deleteLater()

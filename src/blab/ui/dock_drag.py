@@ -235,8 +235,10 @@ class PanelDockController:
             return
         orientation = Qt.Horizontal if position in (CompassPosition.LEFT, CompassPosition.RIGHT) else Qt.Vertical
         axis = EqualiseAxis.HORIZONTAL if orientation == Qt.Horizontal else EqualiseAxis.VERTICAL
+        panel_rects = self.docked_panel_rects()
+        panel_rects.pop(self._panel_id(panel), None)
         member_ids = aligned_layout_members(
-            self.docked_panel_rects(),
+            panel_rects,
             self._panel_id(target_panel),
             axis,
         )
