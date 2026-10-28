@@ -31,26 +31,6 @@ _SOUND_POWER_COLOR = "#d62728"
 _ESTIMATED_IN_ROOM_COLOR = "#e6b800"
 
 
-def spinorama_curve_colors(*, dark_background: bool = False) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Return the conventional (SPL, DI) colours, positionally matching
-    ``SpinoramaCurves.spl_curves()`` and ``di_curves()``.
-
-    Colours follow curve identity, not display text, so the sound-power DI
-    keeps the Sound Power colour whether it is labelled SPDI or Spherical DI.
-    On Axis is black, or white when drawn on a dark background.
-    """
-    on_axis = _ON_AXIS_DARK_BACKGROUND_COLOR if dark_background else _ON_AXIS_LIGHT_BACKGROUND_COLOR
-    spl = (
-        on_axis,
-        _LISTENING_WINDOW_COLOR,
-        _EARLY_REFLECTIONS_COLOR,
-        _SOUND_POWER_COLOR,
-        _ESTIMATED_IN_ROOM_COLOR,
-    )
-    di = (_EARLY_REFLECTIONS_COLOR, _SOUND_POWER_COLOR)
-    return spl, di
-
-
 @dataclass(frozen=True)
 class SpinoramaCurves:
     freq_hz: np.ndarray
@@ -77,6 +57,25 @@ class SpinoramaCurves:
             ("ERDI", self.early_reflections_di_db),
             (self.sound_power_di_label, self.sound_power_di_db),
         )
+
+
+def spinorama_curve_colors(curves: SpinoramaCurves, *, dark_background: bool = False) -> dict[str, str]:
+    """Return the conventional colour for each curve name in ``curves``.
+
+    Colours follow curve identity, not display text, so the sound-power DI
+    keeps the Sound Power colour whether it is labelled SPDI or Spherical DI.
+    On Axis is black, or white when drawn on a dark background.
+    """
+    on_axis = _ON_AXIS_DARK_BACKGROUND_COLOR if dark_background else _ON_AXIS_LIGHT_BACKGROUND_COLOR
+    return {
+        "On Axis": on_axis,
+        "Listen. Wind.": _LISTENING_WINDOW_COLOR,
+        "Early Refl.": _EARLY_REFLECTIONS_COLOR,
+        "Sound Power": _SOUND_POWER_COLOR,
+        "PIR": _ESTIMATED_IN_ROOM_COLOR,
+        "ERDI": _EARLY_REFLECTIONS_COLOR,
+        curves.sound_power_di_label: _SOUND_POWER_COLOR,
+    }
 
 
 def compute_spinorama_from_planes(

@@ -290,17 +290,17 @@ def _save_spinorama_plot(
     di_ax = ax.twinx()
     di_ax.yaxis.set_label_position("right")
     di_ax.yaxis.tick_right()
-    spl_colors, di_colors = spinorama_curve_colors()
-    for (name, values), color in zip(curves.spl_curves(), spl_colors, strict=True):
-        ax.plot(curves.freq_hz, values, linewidth=1.8, label=name, color=color)
-    for (name, values), color in zip(curves.di_curves(), di_colors, strict=True):
+    colors = spinorama_curve_colors(curves)
+    for name, values in curves.spl_curves():
+        ax.plot(curves.freq_hz, values, linewidth=1.8, label=name, color=colors[name])
+    for name, values in curves.di_curves():
         di_ax.plot(
             curves.freq_hz,
             values,
             linewidth=1.4,
             linestyle="--",
             label=name,
-            color=color,
+            color=colors[name],
         )
 
     _setup_log_frequency_axis(ax)

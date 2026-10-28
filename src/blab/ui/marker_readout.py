@@ -6,7 +6,7 @@ draws the box that lists each visible curve's value with a colour swatch.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +15,8 @@ from matplotlib.legend import Legend
 from matplotlib.lines import Line2D
 
 MARKER_READOUT_GID = "plot_marker_readout"
+# Phase in degrees wraps once per turn.
+PHASE_PERIOD_DEG = 360.0
 
 
 def interpolate_log_frequency(
@@ -62,6 +64,11 @@ class MarkerReadoutCurve:
     label: str
     line: Line2D
     period: float | None = None
+
+
+def phase_readout_curves(labels: Sequence[str], phase_lines: Mapping[str, Line2D]) -> tuple[MarkerReadoutCurve, ...]:
+    """One wrapped "<label> phase" readout curve per series, in ``labels`` order."""
+    return tuple(MarkerReadoutCurve(f"{label} phase", phase_lines[label], period=PHASE_PERIOD_DEG) for label in labels)
 
 
 @dataclass(frozen=True)
@@ -145,5 +152,7 @@ __all__ = [
     "MarkerReadoutBox",
     "MarkerReadoutCurve",
     "MarkerReadoutRow",
+    "PHASE_PERIOD_DEG",
     "interpolate_log_frequency",
+    "phase_readout_curves",
 ]

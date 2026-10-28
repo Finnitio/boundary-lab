@@ -31,7 +31,6 @@ class MaxSplCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self._lines: dict[str, object] = {}
         self._series_labels: tuple[str, ...] = ()
         self._series_visibility: dict[str, bool] = {}
-        self._series_actions: dict[str, QAction] = {}
         self._plot_state = None
         super().__init__(self.figure, "Maximum SPL")
         self.calculate_action = QAction("Config", self)
@@ -135,22 +134,14 @@ class MaxSplCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         for index, label in enumerate(labels):
             self._lines[label].set_data(freqs_hz, spl_db[index])
         self._apply_series_visibility()
-        self._update_y_limits()
+        self._update_visible_series_limits()
         self._apply_manual_axis_limits()
         apply_compact_plot_text(self.axes)
         if self._crosshair_visible:
             self._redraw_crosshair()
         self.draw_idle()
 
-    def _apply_series_visibility(self) -> None:
-        for label, line in self._lines.items():
-            line.set_visible(self.is_series_visible(label))
-        self._show_series_legend(self._lines.items())
-
     def _update_visible_series_limits(self) -> None:
-        self._update_y_limits()
-
-    def _update_y_limits(self) -> None:
         finite_rows = []
         for line in self._lines.values():
             if not line.get_visible():

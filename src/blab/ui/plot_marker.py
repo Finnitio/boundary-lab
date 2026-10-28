@@ -15,12 +15,12 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction
 
 from blab.ui.plots import (
-    ISOBAR_CROSSHAIR_COLOR,
-    ISOBAR_CROSSHAIR_LABEL_EDGE,
-    ISOBAR_CROSSHAIR_LABEL_FACE,
+    CROSSHAIR_COLOR,
+    CROSSHAIR_LABEL_EDGE,
+    CROSSHAIR_LABEL_FACE,
     PLOT_TICK_SIZE,
     InteractivePlotCanvas,
-    _format_isobar_crosshair_frequency,
+    format_plot_frequency,
 )
 
 MARKER_LINE_GID = "plot_marker_line"
@@ -85,8 +85,10 @@ class PlotMarker(QObject):
 class PlotMarkerOverlay:
     """Draws the shared marker on one canvas and feeds its mouse input back.
 
-    The canvas extends the drawing through ``_update_marker_readout``, which
-    returns extra artists to blit along with the line and frequency label.
+    The canvas maps frequencies through its marker contract
+    (``marker_frequency_at``, ``marker_frequency_range``, ``frequency_to_axis_x``)
+    and extends the drawing through ``update_marker_readout``, which returns
+    extra artists to blit along with the line and frequency label.
     """
 
     def __init__(self, canvas: InteractivePlotCanvas, marker: PlotMarker) -> None:
@@ -106,18 +108,10 @@ class PlotMarkerOverlay:
     def enabled(self) -> bool:
         return self._marker.enabled
 
-    def _event_frequency(self, event) -> float | None:
-        canvas = self._canvas
-        if not canvas._event_is_in_plot(event) or not canvas._has_crosshair_data():
-            return None
-        # On twin-axes plots the event lands on the twin; read x from the primary axes.
-        axis_x = float(canvas.axes.transData.inverted().transform((event.x, event.y))[0])
-        return canvas._x_limits_to_user_domain((axis_x, axis_x))[0]
-
     def _on_motion(self, event) -> None:
         if not self._marker.enabled:
             return
-        freq_hz = self._event_frequency(event)
+        freq_hz = self._canvas.marker_frequency_at(event)
         if freq_hz is not None:
             self._marker.hover(freq_hz)
 
@@ -126,7 +120,7 @@ class PlotMarkerOverlay:
             return
         if self._canvas._event_hits_series_legend(event):
             return
-        freq_hz = self._event_frequency(event)
+        freq_hz = self._canvas.marker_frequency_at(event)
         if freq_hz is not None:
             self._marker.click(freq_hz)
 
@@ -168,12 +162,13 @@ class PlotMarkerOverlay:
             return False
 
     def _marker_frequency(self) -> float | None:
-        canvas = self._canvas
         freq_hz = self._marker.frequency_hz
-        if not self._marker.enabled or freq_hz is None or not canvas._has_crosshair_data():
+        if not self._marker.enabled or freq_hz is None:
             return None
-        low, high = sorted(canvas._x_limits_to_user_domain(canvas.axes.get_xlim()))
-        return float(np.clip(freq_hz, low, high))
+        span = self._canvas.marker_frequency_range()
+        if span is None:
+            return None
+        return float(np.clip(freq_hz, *span))
 
     def _refresh_artists(self) -> tuple:
         """Move or hide the marker artists; return those to draw."""
@@ -182,17 +177,17 @@ class PlotMarkerOverlay:
             for artist in (self._line, self._label):
                 if artist is not None:
                     artist.set_visible(False)
-            self._canvas._update_marker_readout(None)
+            self._canvas.update_marker_readout(None)
             return ()
         self._ensure_artists()
-        axis_x = self._canvas._x_limits_from_user_domain((freq_hz, freq_hz))[0]
+        axis_x = self._canvas.frequency_to_axis_x(freq_hz)
         self._line.set_xdata([axis_x, axis_x])
         self._line.set_linestyle("-" if self._marker.locked else "--")
         self._label.set_position((axis_x, MARKER_LABEL_AXES_Y))
-        self._label.set_text(_format_isobar_crosshair_frequency(freq_hz))
+        self._label.set_text(format_plot_frequency(freq_hz))
         self._line.set_visible(True)
         self._label.set_visible(True)
-        readout = tuple(self._canvas._update_marker_readout(freq_hz))
+        readout = tuple(self._canvas.update_marker_readout(freq_hz))
         return (self._line, self._label, *readout)
 
     def _ensure_artists(self) -> None:
@@ -204,7 +199,7 @@ class PlotMarkerOverlay:
                 [0.0, 0.0],
                 [0.0, 1.0],
                 transform=axes.get_xaxis_transform(),
-                color=ISOBAR_CROSSHAIR_COLOR,
+                color=CROSSHAIR_COLOR,
                 linewidth=0.9,
                 alpha=0.9,
                 zorder=9,
@@ -221,12 +216,12 @@ class PlotMarkerOverlay:
                 transform=axes.get_xaxis_transform(),
                 ha="center",
                 va="top",
-                color=ISOBAR_CROSSHAIR_LABEL_EDGE,
+                color=CROSSHAIR_LABEL_EDGE,
                 fontsize=PLOT_TICK_SIZE,
                 bbox={
                     "boxstyle": "square,pad=0.12",
-                    "facecolor": ISOBAR_CROSSHAIR_LABEL_FACE,
-                    "edgecolor": ISOBAR_CROSSHAIR_LABEL_EDGE,
+                    "facecolor": CROSSHAIR_LABEL_FACE,
+                    "edgecolor": CROSSHAIR_LABEL_EDGE,
                     "linewidth": 0.8,
                 },
                 clip_on=False,

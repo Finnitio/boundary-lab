@@ -26,6 +26,7 @@ from blab.ui.marker_readout import (
     MarkerReadoutCurve,
     MarkerReadoutRow,
     interpolate_log_frequency,
+    phase_readout_curves,
 )
 from blab.ui.series_visibility import SeriesVisibilityMixin
 
@@ -61,9 +62,10 @@ SPINORAMA_DI_LIMITS = (0.0, SPINORAMA_DB_SPAN)
 SPINORAMA_LEGEND_BOTTOM = 0.006
 # Spinorama series renamed by Spherical Spin share one visibility key.
 SPINORAMA_SERIES_KEY_ALIASES = {"Spherical DI": "SPDI"}
-ISOBAR_CROSSHAIR_COLOR = "#101214"
-ISOBAR_CROSSHAIR_LABEL_FACE = "#f8fbff"
-ISOBAR_CROSSHAIR_LABEL_EDGE = "#2868ff"
+# Crosshair and Marker styling shared by every plot.
+CROSSHAIR_COLOR = "#101214"
+CROSSHAIR_LABEL_FACE = "#f8fbff"
+CROSSHAIR_LABEL_EDGE = "#2868ff"
 ISOBAR_CROSSHAIR_DB_FACE = "#101214"
 
 
@@ -226,10 +228,15 @@ def slider_value_to_frequency(value: int) -> int:
     return int(round(10.0**log_freq))
 
 
-def _format_isobar_crosshair_frequency(freq_hz: float) -> str:
+def format_plot_frequency(freq_hz: float) -> str:
+    """Frequency label for crosshairs and the Marker: whole Hz, or kHz to two decimals."""
     if freq_hz >= 1000.0:
         return f"{freq_hz / 1000.0:.2f}".rstrip("0").rstrip(".") + " kHz"
     return f"{freq_hz:.0f} Hz"
+
+
+# Former isobar-only name, still checked by source-level tests.
+_format_isobar_crosshair_frequency = format_plot_frequency
 
 
 def _grid_bracket(values: np.ndarray, target: float) -> tuple[int, int, float]:
@@ -285,7 +292,29 @@ class InteractivePlotCanvas(SeriesVisibilityMixin, FigureCanvas):
     def _marker_hides_crosshair(self) -> bool:
         return self._marker_overlay is not None and self._marker_overlay.enabled
 
-    def _update_marker_readout(self, freq_hz: float | None) -> tuple[object, ...]:
+    # Marker contract used by ``blab.ui.plot_marker.PlotMarkerOverlay``. Frequencies
+    # are in the user domain (Hz), whatever the x-axis data domain is.
+
+    def marker_frequency_at(self, event) -> float | None:
+        """Frequency under a mouse event, or ``None`` outside the plot or without data."""
+        if not self._event_is_in_plot(event) or not self._has_crosshair_data():
+            return None
+        # On twin-axes plots the event lands on the twin; read x from the primary axes.
+        axis_x = float(self.axes.transData.inverted().transform((event.x, event.y))[0])
+        return self._x_limits_to_user_domain((axis_x, axis_x))[0]
+
+    def marker_frequency_range(self) -> tuple[float, float] | None:
+        """Visible frequency span, low to high, or ``None`` without data."""
+        if not self._has_crosshair_data():
+            return None
+        low, high = sorted(self._x_limits_to_user_domain(self.axes.get_xlim()))
+        return low, high
+
+    def frequency_to_axis_x(self, freq_hz: float) -> float:
+        """Primary-axes x data coordinate of ``freq_hz``."""
+        return self._x_limits_from_user_domain((freq_hz, freq_hz))[0]
+
+    def update_marker_readout(self, freq_hz: float | None) -> tuple[object, ...]:
         """Update per-curve values at the Marker (``None`` hides them); return artists to blit."""
         del freq_hz
         return ()
@@ -813,7 +842,7 @@ class IsobarCanvas(InteractivePlotCanvas):
         if self._crosshair_vline is None:
             self._crosshair_vline = self.axes.axvline(
                 AUDIO_FREQ_MIN_HZ,
-                color=ISOBAR_CROSSHAIR_COLOR,
+                color=CROSSHAIR_COLOR,
                 linewidth=0.9,
                 alpha=0.9,
                 zorder=9,
@@ -822,7 +851,7 @@ class IsobarCanvas(InteractivePlotCanvas):
         if self._crosshair_hline is None:
             self._crosshair_hline = self.axes.axhline(
                 0.0,
-                color=ISOBAR_CROSSHAIR_COLOR,
+                color=CROSSHAIR_COLOR,
                 linewidth=0.9,
                 alpha=0.9,
                 zorder=9,
@@ -836,12 +865,12 @@ class IsobarCanvas(InteractivePlotCanvas):
                 transform=self.axes.get_xaxis_transform(),
                 ha="center",
                 va="top",
-                color=ISOBAR_CROSSHAIR_LABEL_EDGE,
+                color=CROSSHAIR_LABEL_EDGE,
                 fontsize=PLOT_TICK_SIZE,
                 bbox={
                     "boxstyle": "square,pad=0.12",
-                    "facecolor": ISOBAR_CROSSHAIR_LABEL_FACE,
-                    "edgecolor": ISOBAR_CROSSHAIR_LABEL_EDGE,
+                    "facecolor": CROSSHAIR_LABEL_FACE,
+                    "edgecolor": CROSSHAIR_LABEL_EDGE,
                     "linewidth": 0.8,
                 },
                 clip_on=False,
@@ -856,12 +885,12 @@ class IsobarCanvas(InteractivePlotCanvas):
                 transform=self.axes.get_yaxis_transform(),
                 ha="right",
                 va="center",
-                color=ISOBAR_CROSSHAIR_LABEL_EDGE,
+                color=CROSSHAIR_LABEL_EDGE,
                 fontsize=PLOT_TICK_SIZE,
                 bbox={
                     "boxstyle": "square,pad=0.12",
-                    "facecolor": ISOBAR_CROSSHAIR_LABEL_FACE,
-                    "edgecolor": ISOBAR_CROSSHAIR_LABEL_EDGE,
+                    "facecolor": CROSSHAIR_LABEL_FACE,
+                    "edgecolor": CROSSHAIR_LABEL_EDGE,
                     "linewidth": 0.8,
                 },
                 clip_on=False,
@@ -910,7 +939,7 @@ class IsobarCanvas(InteractivePlotCanvas):
         self._crosshair_vline.set_xdata([axis_x, axis_x])
         self._crosshair_hline.set_ydata([self._crosshair_angle_deg, self._crosshair_angle_deg])
         self._crosshair_freq_label.set_position((axis_x, -0.075))
-        self._crosshair_freq_label.set_text(_format_isobar_crosshair_frequency(self._crosshair_freq_hz))
+        self._crosshair_freq_label.set_text(format_plot_frequency(self._crosshair_freq_hz))
         self._crosshair_angle_label.set_position((-0.01, self._crosshair_angle_deg))
         self._crosshair_angle_label.set_text(f"{int(round(self._crosshair_angle_deg)):+d} deg")
         self._crosshair_db_label.xy = (axis_x, self._crosshair_angle_deg)
@@ -1325,12 +1354,9 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
 
     def _marker_readout_curves(self) -> tuple[MarkerReadoutCurve, ...]:
         """Curves listed at the Marker: by default every legend entry, in legend order."""
-        return tuple(
-            MarkerReadoutCurve(str(line.get_label()), line)
-            for _series, line in getattr(self, "_series_legend_entries", ())
-        )
+        return tuple(MarkerReadoutCurve(str(line.get_label()), line) for _series, line in self._series_legend_entries)
 
-    def _update_marker_readout(self, freq_hz: float | None) -> tuple[object, ...]:
+    def update_marker_readout(self, freq_hz: float | None) -> tuple[object, ...]:
         if freq_hz is None:
             self._marker_readout_box.hide()
             return ()
@@ -1346,7 +1372,8 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
                 self._format_crosshair_y(value) if line.axes is self.axes else self._format_secondary_crosshair_y(value)
             )
             rows.append(MarkerReadoutRow(curve.label, line.get_color(), text, line.get_linestyle()))
-        axes_x = self.axes.transAxes.inverted().transform(self.axes.transData.transform((freq_hz, 0.0)))[0]
+        display_x = self.axes.transData.transform((self.frequency_to_axis_x(freq_hz), 0.0))
+        axes_x = self.axes.transAxes.inverted().transform(display_x)[0]
         return self._marker_readout_box.update(self.axes, rows, marker_axes_x=float(axes_x))
 
     def _interactive_axes(self) -> tuple[object, ...]:
@@ -1403,7 +1430,7 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
         if self._crosshair_vline is None:
             self._crosshair_vline = self.axes.axvline(
                 AUDIO_FREQ_MIN_HZ,
-                color=ISOBAR_CROSSHAIR_COLOR,
+                color=CROSSHAIR_COLOR,
                 linewidth=0.9,
                 alpha=0.9,
                 zorder=9,
@@ -1412,7 +1439,7 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
         if self._crosshair_hline is None:
             self._crosshair_hline = self.axes.axhline(
                 0.0,
-                color=ISOBAR_CROSSHAIR_COLOR,
+                color=CROSSHAIR_COLOR,
                 linewidth=0.9,
                 alpha=0.9,
                 zorder=9,
@@ -1426,12 +1453,12 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
                 transform=self.axes.get_xaxis_transform(),
                 ha="center",
                 va="top",
-                color=ISOBAR_CROSSHAIR_LABEL_EDGE,
+                color=CROSSHAIR_LABEL_EDGE,
                 fontsize=PLOT_TICK_SIZE,
                 bbox={
                     "boxstyle": "square,pad=0.12",
-                    "facecolor": ISOBAR_CROSSHAIR_LABEL_FACE,
-                    "edgecolor": ISOBAR_CROSSHAIR_LABEL_EDGE,
+                    "facecolor": CROSSHAIR_LABEL_FACE,
+                    "edgecolor": CROSSHAIR_LABEL_EDGE,
                     "linewidth": 0.8,
                 },
                 clip_on=False,
@@ -1446,12 +1473,12 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
                 transform=self.axes.get_yaxis_transform(),
                 ha="right",
                 va="center",
-                color=ISOBAR_CROSSHAIR_LABEL_EDGE,
+                color=CROSSHAIR_LABEL_EDGE,
                 fontsize=PLOT_TICK_SIZE,
                 bbox={
                     "boxstyle": "square,pad=0.12",
-                    "facecolor": ISOBAR_CROSSHAIR_LABEL_FACE,
-                    "edgecolor": ISOBAR_CROSSHAIR_LABEL_EDGE,
+                    "facecolor": CROSSHAIR_LABEL_FACE,
+                    "edgecolor": CROSSHAIR_LABEL_EDGE,
                     "linewidth": 0.8,
                 },
                 clip_on=False,
@@ -1466,12 +1493,12 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
                 transform=self.secondary_axes.get_yaxis_transform(),
                 ha="left",
                 va="center",
-                color=ISOBAR_CROSSHAIR_LABEL_EDGE,
+                color=CROSSHAIR_LABEL_EDGE,
                 fontsize=PLOT_TICK_SIZE,
                 bbox={
                     "boxstyle": "square,pad=0.12",
-                    "facecolor": ISOBAR_CROSSHAIR_LABEL_FACE,
-                    "edgecolor": ISOBAR_CROSSHAIR_LABEL_EDGE,
+                    "facecolor": CROSSHAIR_LABEL_FACE,
+                    "edgecolor": CROSSHAIR_LABEL_EDGE,
                     "linewidth": 0.8,
                 },
                 clip_on=False,
@@ -1497,7 +1524,7 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
         self._crosshair_vline.set_xdata([freq_hz, freq_hz])
         self._crosshair_hline.set_ydata([y_value, y_value])
         self._crosshair_freq_label.set_position((freq_hz, -0.075))
-        self._crosshair_freq_label.set_text(_format_isobar_crosshair_frequency(freq_hz))
+        self._crosshair_freq_label.set_text(format_plot_frequency(freq_hz))
         self._crosshair_y_label.set_position((-0.01, y_value))
         self._crosshair_y_label.set_text(self._format_crosshair_y(y_value))
         if self._crosshair_secondary_label is not None:
@@ -1526,7 +1553,6 @@ class ImpedanceCanvas(RawCoordinatePlotCanvas):
         self._lines: list[object] = []
         self._series_labels: tuple[str, ...] = ()
         self._series_visibility: dict[str, bool] = {}
-        self._series_actions: dict[str, QAction] = {}
         self._plot_state = None
         super().__init__(self.figure, "Acoustic Impedance")
         self.trace_filter_menu = QMenu("Traces", self)
@@ -1634,15 +1660,12 @@ class ImpedanceCanvas(RawCoordinatePlotCanvas):
             self._lines[index * 2].set_data(freqs_hz, impedance_real[index])
             self._lines[index * 2 + 1].set_data(freqs_hz, impedance_imag[index])
         self._apply_series_visibility()
-        self._update_y_limits()
+        self._update_visible_series_limits()
         self._apply_manual_axis_limits()
         apply_compact_plot_text(self.axes)
         if self._crosshair_visible:
             self._redraw_crosshair()
         self.draw_idle()
-
-    def _update_visible_series_limits(self) -> None:
-        self._update_y_limits()
 
     def _apply_series_visibility(self) -> None:
         entries = []
@@ -1653,7 +1676,7 @@ class ImpedanceCanvas(RawCoordinatePlotCanvas):
                 entries.append((label, line))
         self._show_series_legend(entries)
 
-    def _update_y_limits(self) -> None:
+    def _update_visible_series_limits(self) -> None:
         finite_rows = []
         for line in self._lines:
             if not line.get_visible():
@@ -1684,7 +1707,6 @@ class OnAxisResponseCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self._series_labels: tuple[str, ...] = ()
         self._series_visibility: dict[str, bool] = {}
         self._channel_colors: dict[str, Any] = {}
-        self._series_actions: dict[str, QAction] = {}
         self._phase_available = False
         self._plot_state = None
         super().__init__(self.figure, "On-Axis Frequency Response", secondary_axes=self.phase_axes)
@@ -1940,7 +1962,7 @@ class OnAxisResponseCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
             self._phase_available = bool(phase_series)
             self.show_phase_action.setEnabled(self._phase_available)
             self._apply_series_visibility()
-            self._update_magnitude_limits()
+            self._update_visible_series_limits()
 
         self._apply_manual_axis_limits()
         apply_compact_plot_text(self.axes)
@@ -1956,9 +1978,6 @@ class OnAxisResponseCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
             cycle = rcParams["axes.prop_cycle"].by_key().get("color", ["#1f77b4"])
             self._channel_colors[label] = cycle[(index - 1) % len(cycle)]
         return self._channel_colors[label]
-
-    def _update_visible_series_limits(self) -> None:
-        self._update_magnitude_limits()
 
     def _set_phase_visible(self, _visible: bool) -> None:
         self._apply_series_visibility()
@@ -1979,14 +1998,9 @@ class OnAxisResponseCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self._show_series_legend((label, self._magnitude_lines[label]) for label in self._series_labels)
 
     def _marker_readout_curves(self) -> tuple[MarkerReadoutCurve, ...]:
-        magnitude = super()._marker_readout_curves()
-        phase = tuple(
-            MarkerReadoutCurve(f"{label} phase", self._phase_lines[label], period=360.0)
-            for label in self._series_labels
-        )
-        return (*magnitude, *phase)
+        return (*super()._marker_readout_curves(), *phase_readout_curves(self._series_labels, self._phase_lines))
 
-    def _update_magnitude_limits(self) -> None:
+    def _update_visible_series_limits(self) -> None:
         finite_rows = []
         for label in self._series_labels:
             line = self._magnitude_lines[label]
@@ -2181,11 +2195,7 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
         self._invalidate_crosshair_background()
         spl_curves = curves.spl_curves()
         di_curves = curves.di_curves()
-        spl_colors, di_colors = spinorama_curve_colors(dark_background=plot_background_is_dark(self.axes))
-        colors = {
-            **{name: color for (name, _values), color in zip(spl_curves, spl_colors, strict=True)},
-            **{name: color for (name, _values), color in zip(di_curves, di_colors, strict=True)},
-        }
+        colors = spinorama_curve_colors(curves, dark_background=plot_background_is_dark(self.axes))
         labels = tuple(name for name, _values in (*spl_curves, *di_curves))
         if labels != self._series_labels:
             for line in (*self._spl_lines.values(), *self._di_lines.values()):
