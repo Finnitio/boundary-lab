@@ -32,7 +32,6 @@ class GroupDelayCanvas(RawCoordinatePlotCanvas):
         self._lines: dict[str, Any] = {}
         self._series_labels: tuple[str, ...] = ()
         self._series_visibility: dict[str, bool] = {}
-        self._series_actions: dict[str, QAction] = {}
         self._channel_colors: dict[str, Any] = {}
         self._plot_state = None
         super().__init__(self.figure, "Group Delay")
@@ -142,7 +141,7 @@ class GroupDelayCanvas(RawCoordinatePlotCanvas):
         for index, label in enumerate(labels):
             self._lines[label].set_data(freqs_hz, group_delay_ms[index])
         self._apply_series_visibility()
-        self._update_y_limits()
+        self._update_visible_series_limits()
         self._apply_manual_axis_limits()
         apply_compact_plot_text(self.axes)
         if self._crosshair_visible:
@@ -157,15 +156,7 @@ class GroupDelayCanvas(RawCoordinatePlotCanvas):
             self._channel_colors[label] = cycle[(index - 1) % len(cycle)]
         return self._channel_colors[label]
 
-    def _apply_series_visibility(self) -> None:
-        for label, line in self._lines.items():
-            line.set_visible(self.is_series_visible(label))
-        self._show_series_legend(self._lines.items())
-
     def _update_visible_series_limits(self) -> None:
-        self._update_y_limits()
-
-    def _update_y_limits(self) -> None:
         finite_rows = []
         for line in self._lines.values():
             if not line.get_visible():

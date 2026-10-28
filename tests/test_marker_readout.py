@@ -247,7 +247,7 @@ def test_electrical_impedance_lists_magnitude_and_phase_units(marked) -> None:
 
     assert {label: value for label, (value, _color) in _readout(canvas).items()} == {
         "LF": "8 Ω",
-        "LF phase": "45.0 deg",
+        "LF phase": "45.0°",
     }
 
 
@@ -275,3 +275,28 @@ def test_readout_is_removed_on_solve_reset_and_when_the_marker_is_off(marked) ->
 
     marked.marker.action.setChecked(False)
     assert _readout(kept) is None
+
+
+class _LogDomainOnAxisCanvas(OnAxisResponseCanvas):
+    """Keeps log10(frequency) as x data, like an isobar in log-image mode."""
+
+    def _x_limits_to_user_domain(self, limits: tuple[float, float]) -> tuple[float, float]:
+        return float(10.0 ** limits[0]), float(10.0 ** limits[1])
+
+    def _x_limits_from_user_domain(self, limits: tuple[float, float]) -> tuple[float, float]:
+        return float(np.log10(limits[0])), float(np.log10(limits[1]))
+
+
+def test_readout_sits_beside_the_marker_when_x_data_is_not_in_hz() -> None:
+    canvas = _LogDomainOnAxisCanvas()
+    canvas.update_plot(_FREQS, np.asarray([-10.0, 0.0, 10.0], dtype=np.float32), np.asarray([[80.0, 90.0, 100.0]] * 3))
+    canvas.axes.set_xscale("linear")
+    canvas.axes.set_xlim(2.0, 4.0)
+
+    (box,) = canvas.update_marker_readout(math.sqrt(10.0) * 100.0)
+
+    # 316 Hz is log10 = 2.5: a quarter of the way across the 2..4 axis.
+    anchor = box.get_bbox_to_anchor()
+    anchor_axes_x = canvas.axes.transAxes.inverted().transform((anchor.x0, anchor.y0))[0]
+    assert anchor_axes_x == pytest.approx(0.25)
+    canvas.deleteLater()

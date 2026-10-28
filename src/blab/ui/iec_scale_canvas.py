@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from matplotlib.axes import Axes
 from PySide6.QtGui import QAction
 
 from blab.ui.plot_scale import iec_axes_box
@@ -14,7 +15,13 @@ class IecScaleCanvasMixin:
     available area (so decorations keep their margins); this mixin only fits and
     centres the primary and secondary axes inside it, before every draw and after
     every layout change, so the ratio follows limit changes and resizes.
+
+    Host contract: ``RawCoordinatePlotCanvas`` provides ``axes`` and
+    ``secondary_axes`` (``None`` on single-axis plots).
     """
+
+    axes: Axes
+    secondary_axes: Axes | None
 
     def __init__(self, *args, **kwargs) -> None:
         self._iec_scale_enabled = False
@@ -33,6 +40,10 @@ class IecScaleCanvasMixin:
     def _after_layout_profile_applied(self) -> None:
         super()._after_layout_profile_applied()
         self._fit_iec_axes_box()
+
+    # A pending empty-plot rebuild resets the axes limits and layout. Run it before
+    # fitting, so the box matches the limits about to be drawn; the base class then
+    # finds nothing pending.
 
     def draw(self, *args, **kwargs):
         self._ensure_empty_plot()
@@ -61,6 +72,6 @@ class IecScaleCanvasMixin:
             self.axes.get_ylim(),
         )
         box = (x0 / fig_width, y0 / fig_height, width / fig_width, height / fig_height)
-        for axes in (self.axes, getattr(self, "secondary_axes", None)):
+        for axes in (self.axes, self.secondary_axes):
             if axes is not None:
                 axes.set_position(box)

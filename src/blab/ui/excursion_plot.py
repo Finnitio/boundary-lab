@@ -32,7 +32,6 @@ class FrequencyTraceCanvas(RawCoordinatePlotCanvas):
         self._lines: dict[str, object] = {}
         self._series_labels: tuple[str, ...] = ()
         self._series_visibility: dict[str, bool] = {}
-        self._series_actions: dict[str, QAction] = {}
         self._plot_state = None
         super().__init__(self.figure, title)
         self.trace_filter_menu = QMenu("Traces", self)
@@ -133,22 +132,14 @@ class FrequencyTraceCanvas(RawCoordinatePlotCanvas):
         for index, label in enumerate(labels):
             self._lines[label].set_data(freqs_hz, excursion_mm[index])
         self._apply_series_visibility()
-        self._update_y_limits()
+        self._update_visible_series_limits()
         self._apply_manual_axis_limits()
         apply_compact_plot_text(self.axes)
         if self._crosshair_visible:
             self._redraw_crosshair()
         self.draw_idle()
 
-    def _apply_series_visibility(self) -> None:
-        for label, line in self._lines.items():
-            line.set_visible(self.is_series_visible(label))
-        self._show_series_legend(self._lines.items())
-
     def _update_visible_series_limits(self) -> None:
-        self._update_y_limits()
-
-    def _update_y_limits(self) -> None:
         finite_rows = []
         for line in self._lines.values():
             if not line.get_visible():
@@ -190,7 +181,7 @@ class InterfaceRadiationCanvas(FrequencyTraceCanvas):
     def __init__(self) -> None:
         super().__init__("Radiated SPL by Interface", "On-axis SPL (dB re 20 uPa)", "dB", signed=True)
 
-    def _update_y_limits(self) -> None:
+    def _update_visible_series_limits(self) -> None:
         rows = [np.asarray(line.get_ydata(), dtype=float) for line in self._lines.values() if line.get_visible()]
         values = np.concatenate(rows) if rows else np.empty(0)
         values = values[np.isfinite(values)]

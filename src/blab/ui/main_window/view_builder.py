@@ -272,8 +272,6 @@ class ViewBuilderMixin:
             tool_actions.append(self.plot_marker.action)
             if entry.plot_id in {"electrical_impedance", "on_axis_frequency_response"}:
                 tool_actions.extend((entry.widget.trace_filter_action, entry.widget.show_phase_action))
-                if entry.plot_id == "on_axis_frequency_response":
-                    tool_actions.append(entry.widget.iec_scale_action)
             elif entry.plot_id in {
                 "acoustic_impedance",
                 "group_delay",
@@ -284,11 +282,12 @@ class ViewBuilderMixin:
             }:
                 tool_actions.append(entry.widget.trace_filter_action)
             elif entry.plot_id == "max_spl":
-                tool_actions.extend(
-                    (entry.widget.calculate_action, entry.widget.trace_filter_action, entry.widget.iec_scale_action)
-                )
+                tool_actions.extend((entry.widget.calculate_action, entry.widget.trace_filter_action))
             elif entry.plot_id == "spinorama":
-                tool_actions.extend((self.spherical_spin_action, entry.widget.iec_scale_action))
+                tool_actions.append(self.spherical_spin_action)
+            iec_scale_action = getattr(entry.widget, "iec_scale_action", None)
+            if iec_scale_action is not None:
+                tool_actions.append(iec_scale_action)
             dock = self._make_panel_dock(
                 f"{entry.plot_id}_dock",
                 entry.title,
