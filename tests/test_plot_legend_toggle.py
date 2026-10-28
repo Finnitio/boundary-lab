@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
 from PySide6.QtWidgets import QApplication
 
+from blab.spinorama import SpinoramaCurves
 from blab.ui.electrical_impedance_plot import ElectricalImpedanceCanvas
 from blab.ui.excursion_plot import ExcursionCanvas
 from blab.ui.group_delay_plot import GroupDelayCanvas
 from blab.ui.max_spl_plot import MaxSplCanvas
-from blab.ui.plots import ImpedanceCanvas, OnAxisResponseCanvas
+from blab.ui.plots import ImpedanceCanvas, OnAxisResponseCanvas, SpinoramaCanvas
 
 _APP = QApplication.instance() or QApplication([])
 
@@ -206,3 +209,99 @@ def test_every_traces_menu_plot_toggles_series_from_its_legend(factory) -> None:
     finally:
         canvas.close()
         canvas.deleteLater()
+
+
+def _spinorama_curves(offset: float = 0.0, *, spherical: bool = False) -> SpinoramaCurves:
+    curves = SpinoramaCurves(
+        freq_hz=FREQS,
+        on_axis_db=np.asarray([0.0, 0.0, 0.0]) + offset,
+        listening_window_db=np.asarray([-1.0, -1.0, -1.0]) + offset,
+        early_reflections_db=np.asarray([-2.0, -2.0, -2.0]) + offset,
+        sound_power_db=np.asarray([-3.0, -3.0, -3.0]) + offset,
+        estimated_in_room_db=np.asarray([-2.5, -2.5, -2.5]) + offset,
+        early_reflections_di_db=np.asarray([2.0, 2.0, 2.0]) + offset,
+        sound_power_di_db=np.asarray([3.0, 3.0, 3.0]) + offset,
+    )
+    return replace(curves, sound_power_di_label="Spherical DI") if spherical else curves
+
+
+@pytest.fixture
+def spinorama():
+    canvas = SpinoramaCanvas()
+    canvas.resize(640, 480)
+    canvas.update_curves(_spinorama_curves())
+    canvas.draw()
+    yield canvas
+    canvas.close()
+    canvas.deleteLater()
+
+
+def _visible_curves(canvas) -> set[str]:
+    return {
+        line.get_label()
+        for axes in (canvas.axes, canvas.di_axes)
+        for line in axes.get_lines()
+        if line.get_visible() and not line.get_label().startswith("_")
+    }
+
+
+ALL_PLANAR_CURVES = {"On Axis", "Listen. Wind.", "Early Refl.", "Sound Power", "PIR", "ERDI", "SPDI"}
+
+
+def test_spinorama_spl_and_di_curves_toggle_independently(spinorama) -> None:
+    changes = []
+    spinorama.trace_visibility_changed.connect(lambda: changes.append(True))
+
+    _click_legend_entry(spinorama, spinorama.axes, "Early Refl.")
+    _click_legend_entry(spinorama, spinorama.axes, "ERDI")
+
+    assert _visible_curves(spinorama) == ALL_PLANAR_CURVES - {"Early Refl.", "ERDI"}
+    assert _is_greyed(spinorama.axes, "Early Refl.")
+    assert _is_greyed(spinorama.axes, "ERDI")
+    assert not _is_greyed(spinorama.axes, "SPDI")
+    assert len(changes) == 2
+
+    _click_legend_entry(spinorama, spinorama.axes, "ERDI")
+
+    assert _visible_curves(spinorama) == ALL_PLANAR_CURVES - {"Early Refl."}
+    assert not _is_greyed(spinorama.axes, "ERDI")
+
+
+def test_spinorama_visibility_drives_data_export_selection(spinorama) -> None:
+    spinorama.set_series_visible("Sound Power", False)
+
+    assert not spinorama.is_series_visible("Sound Power")
+    assert spinorama.is_series_visible("On Axis")
+    assert _is_greyed(spinorama.axes, "Sound Power")
+    assert spinorama.has_selected_traces()
+
+    for name in ALL_PLANAR_CURVES:
+        spinorama.set_series_visible(name, False)
+
+    assert not spinorama.has_selected_traces()
+    assert _visible_curves(spinorama) == set()
+
+
+def test_spinorama_hidden_curves_survive_a_data_update(spinorama) -> None:
+    _click_legend_entry(spinorama, spinorama.axes, "PIR")
+
+    spinorama.update_curves(_spinorama_curves(offset=1.0))
+
+    assert _visible_curves(spinorama) == ALL_PLANAR_CURVES - {"PIR"}
+    assert _is_greyed(spinorama.axes, "PIR")
+
+
+def test_hidden_sound_power_di_stays_hidden_across_the_spherical_rename(spinorama) -> None:
+    _click_legend_entry(spinorama, spinorama.axes, "SPDI")
+
+    spinorama.update_curves(_spinorama_curves(spherical=True))
+
+    assert not spinorama.is_series_visible("Spherical DI")
+    assert "Spherical DI" not in _visible_curves(spinorama)
+    assert _is_greyed(spinorama.axes, "Spherical DI")
+
+    _click_legend_entry(spinorama, spinorama.axes, "Spherical DI")
+    spinorama.update_curves(_spinorama_curves())
+
+    assert spinorama.is_series_visible("SPDI")
+    assert "SPDI" in _visible_curves(spinorama)

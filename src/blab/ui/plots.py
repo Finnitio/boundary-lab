@@ -48,6 +48,8 @@ SPINORAMA_DI_LIMITS = (-5.0, 45.0)
 # Legend baseline, in figure coordinates. Axes-relative placement scales with
 # the axes height and falls off short panels.
 SPINORAMA_LEGEND_BOTTOM = 0.006
+# Spinorama series renamed by Spherical Spin share one visibility key.
+SPINORAMA_SERIES_KEY_ALIASES = {"Spherical DI": "SPDI"}
 ISOBAR_CROSSHAIR_COLOR = "#101214"
 ISOBAR_CROSSHAIR_LABEL_FACE = "#f8fbff"
 ISOBAR_CROSSHAIR_LABEL_EDGE = "#2868ff"
@@ -1951,7 +1953,8 @@ class SpinoramaCanvas(RawCoordinatePlotCanvas):
         self.di_axes = self.axes.twinx()
         self._spl_lines: dict[str, object] = {}
         self._di_lines: dict[str, object] = {}
-        self._series_labels: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
+        self._series_labels: tuple[str, ...] = ()
+        self._series_visibility: dict[str, bool] = {}
         self._plot_state = None
         super().__init__(self.figure, "Spinorama", secondary_axes=self.di_axes)
         self.set_layout_profile(SPINORAMA_LAYOUT)
@@ -1962,10 +1965,14 @@ class SpinoramaCanvas(RawCoordinatePlotCanvas):
         self.di_axes.yaxis.set_label_position("right")
         self.di_axes.yaxis.tick_right()
 
+    def _series_visibility_key(self, label: str) -> str:
+        # Sound-power DI keeps its hidden state when Spherical Spin renames it.
+        return SPINORAMA_SERIES_KEY_ALIASES.get(str(label), str(label))
+
     def _reset_plot_data(self) -> None:
         self._spl_lines = {}
         self._di_lines = {}
-        self._series_labels = ((), ())
+        self._series_labels = ()
         self._plot_state = None
         self._reset_crosshair_artists()
         self._reset_comparison_interaction()
@@ -1989,6 +1996,26 @@ class SpinoramaCanvas(RawCoordinatePlotCanvas):
         self._apply_manual_axis_limits()
         self._redraw_crosshair()
         self.draw_idle()
+
+    def _apply_series_visibility(self) -> None:
+        lines = {**self._spl_lines, **self._di_lines}
+        for name, line in lines.items():
+            line.set_visible(self.is_series_visible(name))
+        self._show_series_legend(
+            lines.items(),
+            loc="lower center",
+            bbox_to_anchor=(0.5, SPINORAMA_LEGEND_BOTTOM),
+            bbox_transform=self.figure.transFigure,
+            ncols=4,
+            borderaxespad=0.0,
+            frameon=False,
+            # Two rows in a fixed-fraction margin; tight spacing suits
+            # short panels.
+            borderpad=0.0,
+            labelspacing=0.25,
+            handlelength=1.6,
+            handletextpad=0.5,
+        )
 
     def _format_crosshair_y(self, value: float) -> str:
         return f"{value:.1f} dB SPL"
@@ -2063,7 +2090,7 @@ class SpinoramaCanvas(RawCoordinatePlotCanvas):
         }
         spl_curves = curves.spl_curves()
         di_curves = curves.di_curves()
-        labels = (tuple(name for name, _values in spl_curves), tuple(name for name, _values in di_curves))
+        labels = tuple(name for name, _values in (*spl_curves, *di_curves))
         if labels != self._series_labels:
             for line in (*self._spl_lines.values(), *self._di_lines.values()):
                 line.remove()
@@ -2082,32 +2109,13 @@ class SpinoramaCanvas(RawCoordinatePlotCanvas):
                 )[0]
                 for name, _values in di_curves
             }
-            legend = self.axes.get_legend()
-            if legend is not None:
-                legend.remove()
-            lines = [*self._spl_lines.values(), *self._di_lines.values()]
-            self.axes.legend(
-                lines,
-                [*labels[0], *labels[1]],
-                loc="lower center",
-                bbox_to_anchor=(0.5, SPINORAMA_LEGEND_BOTTOM),
-                bbox_transform=self.figure.transFigure,
-                ncols=4,
-                borderaxespad=0.0,
-                frameon=False,
-                # Two rows in a fixed-fraction margin; tight spacing suits
-                # short panels.
-                borderpad=0.0,
-                labelspacing=0.25,
-                handlelength=1.6,
-                handletextpad=0.5,
-            )
             self._series_labels = labels
 
         for name, values in spl_curves:
             self._spl_lines[name].set_data(curves.freq_hz, values)
         for name, values in di_curves:
             self._di_lines[name].set_data(curves.freq_hz, values)
+        self._apply_series_visibility()
 
         self.axes.set_ylim(*SPINORAMA_SPL_LIMITS)
         self.di_axes.set_ylim(*SPINORAMA_DI_LIMITS)
