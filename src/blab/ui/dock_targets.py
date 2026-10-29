@@ -269,6 +269,8 @@ def panel_preview_rect(
     panel_rects: Mapping[str, Rect],
     panel_id: str,
     position: CompassPosition,
+    *,
+    separator_extent: int = 0,
 ) -> Rect | None:
     """Return the dropped panel's final equal-share area beside ``panel_id``."""
     panel = panel_rects.get(panel_id)
@@ -277,7 +279,12 @@ def panel_preview_rect(
     placement = compass_placement(position)
     if placement is None:
         return panel
-    member_ids = aligned_layout_members(panel_rects, panel_id, placement.axis)
+    member_ids = aligned_layout_members(
+        panel_rects,
+        panel_id,
+        placement.axis,
+        separator_extent=separator_extent,
+    )
     members = [panel_rects[member_id] for member_id in member_ids]
     target_index = member_ids.index(panel_id)
     insertion_index = target_index if placement.before else target_index + 1
@@ -292,6 +299,28 @@ def panel_preview_rect(
     return Rect(panel.x, top + insertion_index * height, panel.width, height)
 
 
+def drop_preview_rect(
+    workspace: Rect,
+    panel_rects: Mapping[str, Rect],
+    target: PanelDropTarget,
+    *,
+    separator_extent: int = 0,
+) -> Rect | None:
+    """Return the landing area using the same logical runs as placement."""
+    if target.edge is not None:
+        placement = edge_placement(target.edge)
+        member_count = len(top_level_layout_members(panel_rects, placement.axis))
+        return preview_rect(workspace, target.edge, member_count)
+    if target.panel_id is None or target.position is None:
+        return None
+    return panel_preview_rect(
+        panel_rects,
+        target.panel_id,
+        target.position,
+        separator_extent=separator_extent,
+    )
+
+
 __all__ = [
     "CompassPosition",
     "Edge",
@@ -303,6 +332,7 @@ __all__ = [
     "compass_target_rects",
     "aligned_layout_members",
     "compass_placement",
+    "drop_preview_rect",
     "edge_target_rects",
     "edge_placement",
     "panel_preview_rect",

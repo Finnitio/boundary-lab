@@ -7,7 +7,7 @@ from collections.abc import Callable
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt, QtMsgType, qInstallMessageHandler
 from PySide6.QtGui import QAction, QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QApplication, QDockWidget, QMainWindow, QWidget
+from PySide6.QtWidgets import QApplication, QDockWidget, QMainWindow, QStyle, QTabBar, QWidget
 
 from blab.ui.dock_drag import PanelDockController
 from blab.ui.dock_targets import (
@@ -155,6 +155,106 @@ def test_side_drop_preview_shows_the_new_panels_final_equal_share() -> None:
         300,
         600,
     )
+
+
+def test_drag_overlay_exposes_all_targets_and_one_third_directional_preview(
+    dock_workspace,
+    qapp,
+) -> None:
+    workspace = dock_workspace.window
+    first = dock_workspace.add_panel("first")
+    second = dock_workspace.add_panel("second")
+    moved = dock_workspace.add_panel("moved")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, first)
+    workspace.splitDockWidget(first, second, Qt.Horizontal)
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = dock_workspace.controller(first, second, moved)
+    workspace.show()
+    qapp.processEvents()
+
+    groups = controller.docked_group_targets()
+    second_group = next(group for group in groups if "second" in group.member_ids)
+    right_rect = compass_target_rects(second_group.rect)[CompassPosition.RIGHT]
+    cursor = workspace.mapToGlobal(QPoint(right_rect.x + right_rect.width // 2, right_rect.y + right_rect.height // 2))
+
+    controller.start_drag(moved, cursor)
+
+    expected_active = PanelDropTarget.panel(second_group.panel_id, CompassPosition.RIGHT)
+    assert set(controller.overlay.target_rects) == {
+        *(PanelDropTarget.outer(edge) for edge in Edge),
+        *(PanelDropTarget.panel(group.panel_id, position) for group in groups for position in CompassPosition),
+    }
+    assert controller.overlay.active_target == expected_active
+    total_left = min(group.rect.x for group in groups)
+    total_right = max(group.rect.right for group in groups)
+    expected_width = (total_right - total_left) // 3
+    expected_preview = Rect(
+        total_left + 2 * expected_width,
+        second_group.rect.y,
+        expected_width,
+        second_group.rect.height,
+    )
+    assert controller.overlay.preview_rect == expected_preview
+
+    local_cursor = workspace.mapFromGlobal(cursor)
+    QApplication.sendEvent(
+        controller.overlay,
+        QMouseEvent(
+            QEvent.MouseButtonRelease,
+            QPointF(local_cursor),
+            QPointF(cursor),
+            Qt.LeftButton,
+            Qt.NoButton,
+            Qt.NoModifier,
+        ),
+    )
+    qapp.processEvents()
+
+    separator_tolerance = workspace.style().pixelMetric(QStyle.PM_DockWidgetSeparatorExtent) + 2
+    assert not moved.isFloating()
+    assert abs(moved.x() - expected_preview.x) <= separator_tolerance
+    assert abs(moved.width() - expected_preview.width) <= separator_tolerance
+
+
+def test_centre_preview_covers_the_target_groups_complete_spatial_slot(
+    dock_workspace,
+    qapp,
+) -> None:
+    workspace = dock_workspace.window
+    first_tab = dock_workspace.add_panel("first-tab")
+    active_tab = dock_workspace.add_panel("active-tab")
+    moved = dock_workspace.add_panel("moved")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, first_tab)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, active_tab)
+    workspace.tabifyDockWidget(first_tab, active_tab)
+    active_tab.raise_()
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = dock_workspace.controller(first_tab, active_tab, moved)
+    workspace.show()
+    qapp.processEvents()
+
+    group = controller.docked_group_targets()[0]
+    tab_bar = next(tab_bar for tab_bar in workspace.findChildren(QTabBar) if tab_bar.isVisible())
+    tab_origin = tab_bar.mapTo(workspace, QPoint())
+    complete_bottom = max(group.rect.bottom, tab_origin.y() + tab_bar.height())
+    centre = compass_target_rects(group.rect)[CompassPosition.CENTER]
+    cursor = workspace.mapToGlobal(QPoint(centre.x + centre.width // 2, centre.y + centre.height // 2))
+
+    controller.start_drag(moved, cursor)
+
+    assert controller.overlay.active_target == PanelDropTarget.panel(group.panel_id, CompassPosition.CENTER)
+    assert controller.overlay.preview_rect == Rect(
+        group.rect.x,
+        group.rect.y,
+        group.rect.width,
+        complete_bottom - group.rect.y,
+    )
+    assert controller.overlay.preview_rect.bottom == tab_origin.y() + tab_bar.height()
+
+    controller.overlay.end()
+    controller.cancel_drag()
 
 
 def test_equalisation_uses_remaining_tab_as_group_representative() -> None:

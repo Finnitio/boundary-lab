@@ -19,11 +19,9 @@ from blab.ui.dock_targets import (
     aligned_layout_members,
     compass_placement,
     compass_target_rects,
+    drop_preview_rect,
     edge_placement,
     edge_target_rects,
-    panel_preview_rect,
-    panel_under_cursor,
-    preview_rect,
     resolve_drop_target,
     top_level_layout_members,
 )
@@ -45,7 +43,8 @@ class PanelDropOverlay(QWidget):
         self._controller = controller
         self._dragged_panel: QDockWidget | None = None
         self._hovered_target: PanelDropTarget | None = None
-        self._compass_panel_id: str | None = None
+        self._preview_rect: Rect | None = None
+        self._target_rects: dict[PanelDropTarget, Rect] = {}
         self._panel_rects: dict[str, Rect] = {}
         self._eligible_targets: tuple[PanelGroupTarget, ...] = ()
         self.setObjectName("panelDropOverlay")
@@ -69,6 +68,21 @@ class PanelDropOverlay(QWidget):
         """Return the logical panel groups available to the active drag."""
         return self._eligible_targets
 
+    @property
+    def target_rects(self) -> dict[PanelDropTarget, Rect]:
+        """Return every target currently offered by the drag overlay."""
+        return dict(self._target_rects)
+
+    @property
+    def active_target(self) -> PanelDropTarget | None:
+        """Return the exact target currently under the pointer."""
+        return self._hovered_target
+
+    @property
+    def preview_rect(self) -> Rect | None:
+        """Return the active target's expected final landing area."""
+        return self._preview_rect
+
     def end(self) -> None:
         if self.mouseGrabber() is self:
             self.releaseMouse()
@@ -76,7 +90,8 @@ class PanelDropOverlay(QWidget):
             self.releaseKeyboard()
         self._dragged_panel = None
         self._hovered_target = None
-        self._compass_panel_id = None
+        self._preview_rect = None
+        self._target_rects = {}
         self._panel_rects = {}
         self._eligible_targets = ()
         self.hide()
@@ -87,8 +102,24 @@ class PanelDropOverlay(QWidget):
         cursor = Point(local.x(), local.y())
         self._eligible_targets = self._controller.docked_group_targets()
         self._panel_rects = {target.panel_id: target.rect for target in self._eligible_targets}
-        self._compass_panel_id = panel_under_cursor(cursor, self._panel_rects)
+        self._target_rects = {
+            **{PanelDropTarget.outer(edge): rect for edge, rect in edge_target_rects(workspace).items()},
+            **{
+                PanelDropTarget.panel(panel_id, position): rect
+                for panel_id, panel_rect in self._panel_rects.items()
+                for position, rect in compass_target_rects(panel_rect).items()
+            },
+        }
         self._hovered_target = resolve_drop_target(cursor, workspace, self._panel_rects)
+        self._preview_rect = (
+            self._controller.drop_preview_rect(
+                workspace,
+                self._panel_rects,
+                self._hovered_target,
+            )
+            if self._hovered_target is not None
+            else None
+        )
         self.update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
@@ -116,41 +147,61 @@ class PanelDropOverlay(QWidget):
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt override
         del event
-        workspace = Rect(0, 0, self.width(), self.height())
         highlight = self.palette().color(self.palette().ColorRole.Highlight)
-        target_fill = QColor(highlight)
-        target_fill.setAlpha(90)
+        neutral = self.palette().color(self.palette().ColorRole.Mid)
         preview_fill = QColor(highlight)
         preview_fill.setAlpha(55)
 
         painter = QPainter(self)
-        painter.setPen(QPen(highlight, 2))
-        if self._hovered_target is not None:
-            preview_panel_rects = self._panel_rects
-            if self._hovered_target.edge is not None:
-                placement = edge_placement(self._hovered_target.edge)
-                member_count = len(top_level_layout_members(preview_panel_rects, placement.axis))
-                hovered_preview = preview_rect(workspace, self._hovered_target.edge, member_count)
-            else:
-                panel_id = self._hovered_target.panel_id or ""
-                position = self._hovered_target.position
-                hovered_preview = (
-                    panel_preview_rect(preview_panel_rects, panel_id, position)
-                    if panel_id in preview_panel_rects and position is not None
-                    else None
-                )
-            if hovered_preview is not None:
-                painter.fillRect(_qrect(hovered_preview), preview_fill)
-        for target in edge_target_rects(workspace).values():
-            rect = _qrect(target).adjusted(5, 5, -5, -5)
-            painter.fillRect(rect, target_fill)
+        if self._preview_rect is not None:
+            painter.fillRect(_qrect(self._preview_rect), preview_fill)
+        for target, target_rect in self._target_rects.items():
+            active = target == self._hovered_target
+            color = QColor(highlight if active else neutral)
+            color.setAlpha(120 if active else 75)
+            painter.setPen(QPen(highlight if active else neutral, 2 if active else 1))
+            inset = 5 if target.edge is not None else 3
+            rect = _qrect(target_rect).adjusted(inset, inset, -inset, -inset)
+            painter.fillRect(rect, color)
             painter.drawRect(rect)
-        compass_panel = self._panel_rects.get(self._compass_panel_id or "")
-        if compass_panel is not None:
-            for target in compass_target_rects(compass_panel).values():
-                rect = _qrect(target).adjusted(3, 3, -3, -3)
-                painter.fillRect(rect, target_fill)
-                painter.drawRect(rect)
+            if target.position is not None:
+                self._draw_compass_symbol(painter, rect, target.position)
+
+    @staticmethod
+    def _draw_compass_symbol(
+        painter: QPainter,
+        rect: QRect,
+        position: CompassPosition,
+    ) -> None:
+        """Draw a theme-colored arrow or tab glyph inside one compass target."""
+        centre = rect.center()
+        span = max(3, min(rect.width(), rect.height()) // 4)
+        if position == CompassPosition.CENTER:
+            body = QRect(centre.x() - span, centre.y() - span // 2, span * 2, span + 2)
+            painter.drawRect(body)
+            painter.drawLine(body.left() + 2, body.top(), body.left() + span, body.top() - max(2, span // 2))
+            painter.drawLine(body.left() + span, body.top() - max(2, span // 2), body.right() - 2, body.top())
+            return
+
+        if position == CompassPosition.LEFT:
+            tip = QPoint(centre.x() - span, centre.y())
+            tail = QPoint(centre.x() + span, centre.y())
+            wings = (QPoint(tip.x() + span, tip.y() - span), QPoint(tip.x() + span, tip.y() + span))
+        elif position == CompassPosition.RIGHT:
+            tip = QPoint(centre.x() + span, centre.y())
+            tail = QPoint(centre.x() - span, centre.y())
+            wings = (QPoint(tip.x() - span, tip.y() - span), QPoint(tip.x() - span, tip.y() + span))
+        elif position == CompassPosition.TOP:
+            tip = QPoint(centre.x(), centre.y() - span)
+            tail = QPoint(centre.x(), centre.y() + span)
+            wings = (QPoint(tip.x() - span, tip.y() + span), QPoint(tip.x() + span, tip.y() + span))
+        else:
+            tip = QPoint(centre.x(), centre.y() + span)
+            tail = QPoint(centre.x(), centre.y() - span)
+            wings = (QPoint(tip.x() - span, tip.y() - span), QPoint(tip.x() + span, tip.y() - span))
+        painter.drawLine(tail, tip)
+        painter.drawLine(tip, wings[0])
+        painter.drawLine(tip, wings[1])
 
 
 class PanelDockController:
@@ -285,6 +336,41 @@ class PanelDockController:
                 )
         return rect
 
+    def _rects_with_complete_target_slot(
+        self,
+        panel_rects: dict[str, Rect],
+        target_panel: QDockWidget,
+    ) -> dict[str, Rect]:
+        """Use the target's complete tab-group slot for preview and placement."""
+        target_panel_id = self._panel_id(target_panel)
+        result = dict(panel_rects)
+        target_rect = result.get(target_panel_id)
+        if target_rect is not None:
+            result[target_panel_id] = self._panel_slot_rect(target_panel, target_rect)
+        return result
+
+    def drop_preview_rect(
+        self,
+        workspace: Rect,
+        panel_rects: dict[str, Rect],
+        target: PanelDropTarget,
+    ) -> Rect | None:
+        """Return a target preview from the logical geometry used by placement."""
+        preview_rects = panel_rects
+        if target.panel_id is not None:
+            target_panel = next(
+                (panel for panel in self._panels if self._panel_id(panel) == target.panel_id),
+                None,
+            )
+            if target_panel is not None:
+                preview_rects = self._rects_with_complete_target_slot(panel_rects, target_panel)
+        return drop_preview_rect(
+            workspace,
+            preview_rects,
+            target,
+            separator_extent=self._separator_extent(),
+        )
+
     def finish_drag(
         self,
         panel: QDockWidget,
@@ -356,10 +442,8 @@ class PanelDockController:
         target_group = next(group for group in logical_groups if target_panel_id in group.member_ids)
         for member_id in target_group.member_ids:
             panel_rects.pop(member_id, None)
-        panel_rects[target_panel_id] = self._panel_slot_rect(
-            target_panel,
-            target_group.rect,
-        )
+        panel_rects[target_panel_id] = target_group.rect
+        panel_rects = self._rects_with_complete_target_slot(panel_rects, target_panel)
         member_ids = aligned_layout_members(
             panel_rects,
             target_panel_id,
