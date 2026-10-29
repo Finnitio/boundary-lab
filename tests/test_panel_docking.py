@@ -19,9 +19,13 @@ from blab.ui.dock_targets import (
     Rect,
     aligned_layout_members,
     compass_target_rects,
+    drop_target_rects,
+    edge_target_rects,
     panel_preview_rect,
     resolve_drop_target,
     resolve_outer_edge_target,
+    resolve_target_rects,
+    target_paint_order,
     top_level_layout_members,
 )
 from blab.ui.main_window_widgets import DockTitleBar
@@ -87,7 +91,32 @@ def test_cursor_resolves_each_compass_target_and_centre_over_panel() -> None:
         assert resolve_drop_target(cursor, workspace, panels) == PanelDropTarget.panel("target", position)
 
 
-def test_outer_edge_precedes_compass_and_dragged_group_is_not_a_target() -> None:
+@pytest.mark.parametrize(
+    "owner",
+    [
+        Rect(10, 20, 30, 18),
+        Rect(10, 20, 2, 1),
+        Rect(10, 20, 0, 0),
+    ],
+)
+def test_compass_targets_fit_inside_dense_and_zero_sized_groups(owner: Rect) -> None:
+    for target in compass_target_rects(owner).values():
+        assert target.width >= 0
+        assert target.height >= 0
+        assert owner.x <= target.x <= target.right <= owner.right
+        assert owner.y <= target.y <= target.bottom <= owner.bottom
+
+
+@pytest.mark.parametrize("workspace", [Rect(5, 7, 30, 12), Rect(5, 7, 1, 1), Rect(5, 7, 0, 0)])
+def test_edge_targets_have_non_negative_geometry_in_tiny_workspaces(workspace: Rect) -> None:
+    for target in edge_target_rects(workspace).values():
+        assert target.width >= 0
+        assert target.height >= 0
+        assert workspace.x <= target.x <= target.right <= workspace.right
+        assert workspace.y <= target.y <= target.bottom <= workspace.bottom
+
+
+def test_compass_precedes_outer_edge_and_edge_wins_elsewhere() -> None:
     workspace = Rect(0, 0, 400, 300)
     panels = {
         "edge-panel": Rect(0, 0, 120, 300),
@@ -95,7 +124,11 @@ def test_outer_edge_precedes_compass_and_dragged_group_is_not_a_target() -> None
         "dragged-tab": Rect(120, 0, 280, 300),
     }
 
-    assert resolve_drop_target(Point(59, 150), workspace, panels) == PanelDropTarget.outer(Edge.LEFT)
+    assert resolve_drop_target(Point(59, 150), workspace, panels) == PanelDropTarget.panel(
+        "edge-panel",
+        CompassPosition.CENTER,
+    )
+    assert resolve_drop_target(Point(10, 10), workspace, panels) == PanelDropTarget.outer(Edge.LEFT)
     assert (
         resolve_drop_target(
             Point(260, 150),
@@ -105,6 +138,42 @@ def test_outer_edge_precedes_compass_and_dragged_group_is_not_a_target() -> None
         )
         is None
     )
+
+
+@pytest.mark.parametrize("reverse_order", [False, True])
+def test_overlapping_compasses_choose_nearest_centre_independent_of_order(reverse_order: bool) -> None:
+    workspace = Rect(0, 0, 200, 100)
+    entries = [("alpha", Rect(0, 0, 90, 90)), ("beta", Rect(20, 0, 90, 90))]
+    panels = dict(reversed(entries) if reverse_order else entries)
+    targets = drop_target_rects(workspace, panels)
+
+    assert resolve_target_rects(Point(51, 45), targets) == PanelDropTarget.panel(
+        "alpha",
+        CompassPosition.CENTER,
+    )
+    assert resolve_target_rects(Point(58, 45), targets) == PanelDropTarget.panel(
+        "beta",
+        CompassPosition.CENTER,
+    )
+    assert resolve_target_rects(Point(55, 45), targets) == PanelDropTarget.panel(
+        "alpha",
+        CompassPosition.CENTER,
+    )
+
+
+def test_winning_compass_paints_above_edges_and_competing_compasses() -> None:
+    workspace = Rect(0, 0, 200, 100)
+    targets = drop_target_rects(
+        workspace,
+        {"alpha": Rect(0, 0, 90, 90), "beta": Rect(20, 0, 90, 90)},
+    )
+    active = resolve_target_rects(Point(58, 45), targets)
+
+    order = target_paint_order(targets, active)
+
+    assert all(target.edge is not None for target in order[:4])
+    assert {target.panel_id for target in order[-5:]} == {"beta"}
+    assert set(order) == set(targets)
 
 
 def test_equalisation_members_are_the_logical_groups_aligned_with_the_drop() -> None:
@@ -215,6 +284,48 @@ def test_drag_overlay_exposes_all_targets_and_one_third_directional_preview(
     assert not moved.isFloating()
     assert abs(moved.x() - expected_preview.x) <= separator_tolerance
     assert abs(moved.width() - expected_preview.width) <= separator_tolerance
+
+
+def test_dense_small_workspace_keeps_compasses_fitted_and_paints_direct_hit_last(
+    dock_workspace,
+    qapp,
+) -> None:
+    workspace = dock_workspace.window
+    workspace.resize(240, 120)
+    left = dock_workspace.add_panel("left")
+    right = dock_workspace.add_panel("right")
+    moved = dock_workspace.add_panel("moved")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, left)
+    workspace.splitDockWidget(left, right, Qt.Horizontal)
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = dock_workspace.controller(left, right, moved)
+    workspace.show()
+    qapp.processEvents()
+
+    groups = controller.docked_group_targets()
+    left_group = min(groups, key=lambda group: group.rect.x)
+    left_target = compass_target_rects(left_group.rect)[CompassPosition.LEFT]
+    cursor = workspace.mapToGlobal(
+        QPoint(left_target.x + left_target.width // 2, left_target.y + left_target.height // 2)
+    )
+
+    controller.start_drag(moved, cursor)
+
+    expected_active = PanelDropTarget.panel(left_group.panel_id, CompassPosition.LEFT)
+    assert controller.overlay.active_target == expected_active
+    assert controller.overlay.target_rects == drop_target_rects(
+        Rect(0, 0, workspace.width(), workspace.height()),
+        {group.panel_id: group.rect for group in groups},
+    )
+    for group in groups:
+        for target in compass_target_rects(group.rect).values():
+            assert group.rect.x <= target.x <= target.right <= group.rect.right
+            assert group.rect.y <= target.y <= target.bottom <= group.rect.bottom
+    assert {target.panel_id for target in controller.overlay.paint_order[-5:]} == {left_group.panel_id}
+
+    controller.overlay.end()
+    controller.cancel_drag()
 
 
 def test_centre_preview_covers_the_target_groups_complete_spatial_slot(

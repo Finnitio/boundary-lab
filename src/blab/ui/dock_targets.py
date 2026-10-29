@@ -118,15 +118,20 @@ class Rect:
 
 def edge_target_rects(workspace: Rect) -> dict[Edge, Rect]:
     """Return large, predictable hit areas along all workspace edges."""
-    thickness = max(24, min(80, workspace.width // 5, workspace.height // 5))
+    width = max(0, workspace.width)
+    height = max(0, workspace.height)
+    preferred = max(24, min(80, width // 5, height // 5))
+    thickness = min(preferred, width // 2, height // 2)
+    right = workspace.x + width
+    bottom = workspace.y + height
     return {
-        Edge.LEFT: Rect(workspace.x, workspace.y, thickness, workspace.height),
-        Edge.RIGHT: Rect(workspace.right - thickness, workspace.y, thickness, workspace.height),
-        Edge.TOP: Rect(workspace.x + thickness, workspace.y, workspace.width - 2 * thickness, thickness),
+        Edge.LEFT: Rect(workspace.x, workspace.y, thickness, height),
+        Edge.RIGHT: Rect(right - thickness, workspace.y, thickness, height),
+        Edge.TOP: Rect(workspace.x + thickness, workspace.y, width - 2 * thickness, thickness),
         Edge.BOTTOM: Rect(
             workspace.x + thickness,
-            workspace.bottom - thickness,
-            workspace.width - 2 * thickness,
+            bottom - thickness,
+            width - 2 * thickness,
             thickness,
         ),
     }
@@ -146,8 +151,8 @@ def resolve_outer_edge_target(
 
 
 def compass_target_rects(panel: Rect) -> dict[CompassPosition, Rect]:
-    """Return the five large targets centred over a panel."""
-    size = max(24, min(64, panel.width // 4, panel.height // 4))
+    """Return a five-target cross fitted wholly inside ``panel``."""
+    size = max(0, min(64, panel.width // 3, panel.height // 3))
     centre_x = panel.x + panel.width // 2
     centre_y = panel.y + panel.height // 2
 
@@ -176,23 +181,86 @@ def panel_under_cursor(
     return None
 
 
+def drop_target_rects(
+    workspace: Rect,
+    panel_rects: Mapping[str, Rect],
+) -> dict[PanelDropTarget, Rect]:
+    """Return the shared painted and clickable geometry for one overlay."""
+    return {
+        **{PanelDropTarget.outer(edge): rect for edge, rect in edge_target_rects(workspace).items()},
+        **{
+            PanelDropTarget.panel(panel_id, position): rect
+            for panel_id, panel_rect in panel_rects.items()
+            for position, rect in compass_target_rects(panel_rect).items()
+        },
+    }
+
+
+def resolve_target_rects(
+    cursor: Point,
+    target_rects: Mapping[PanelDropTarget, Rect],
+    excluded_panel_ids: Collection[str] = (),
+) -> PanelDropTarget | None:
+    """Resolve ``cursor`` directly against shared target geometry."""
+    excluded = set(excluded_panel_ids)
+    compass_hits = [
+        (target, rect)
+        for target, rect in target_rects.items()
+        if target.panel_id not in excluded and target.position is not None and rect.contains(cursor)
+    ]
+    if compass_hits:
+
+        def compass_rank(item: tuple[PanelDropTarget, Rect]) -> tuple[int, str, str]:
+            target, rect = item
+            doubled_dx = 2 * cursor.x - (2 * rect.x + rect.width)
+            doubled_dy = 2 * cursor.y - (2 * rect.y + rect.height)
+            return (
+                doubled_dx * doubled_dx + doubled_dy * doubled_dy,
+                target.panel_id or "",
+                target.position.value,
+            )
+
+        return min(compass_hits, key=compass_rank)[0]
+
+    for target, rect in target_rects.items():
+        if target.edge is not None and rect.contains(cursor):
+            return target
+    return None
+
+
+def target_paint_order(
+    target_rects: Mapping[PanelDropTarget, Rect],
+    active_target: PanelDropTarget | None,
+) -> tuple[PanelDropTarget, ...]:
+    """Return deterministic back-to-front target stacking for an overlay."""
+    edges = sorted(
+        (target for target in target_rects if target.edge is not None),
+        key=lambda target: target.edge.value,
+    )
+    active_panel_id = active_target.panel_id if active_target is not None else None
+    compasses = sorted(
+        (target for target in target_rects if target.position is not None),
+        key=lambda target: (
+            target.panel_id == active_panel_id,
+            target.panel_id or "",
+            target.position.value,
+        ),
+    )
+    return tuple((*edges, *compasses))
+
+
 def resolve_drop_target(
     cursor: Point,
     workspace: Rect,
     panel_rects: Mapping[str, Rect],
     excluded_panel_ids: Collection[str] = (),
 ) -> PanelDropTarget | None:
-    """Resolve one target, giving workspace edges precedence over a compass."""
-    edge = resolve_outer_edge_target(cursor, workspace)
-    if edge is not None:
-        return PanelDropTarget.outer(edge)
-    panel_id = panel_under_cursor(cursor, panel_rects, excluded_panel_ids)
-    if panel_id is None:
-        return None
-    for position, target_rect in compass_target_rects(panel_rects[panel_id]).items():
-        if target_rect.contains(cursor):
-            return PanelDropTarget.panel(panel_id, position)
-    return None
+    """Resolve one target, preferring direct compass hits over workspace edges."""
+    return resolve_target_rects(
+        cursor,
+        drop_target_rects(workspace, panel_rects),
+        excluded_panel_ids,
+    )
 
 
 def aligned_layout_members(
