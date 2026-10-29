@@ -125,6 +125,23 @@ def test_equalisation_members_are_the_logical_groups_aligned_with_the_drop() -> 
     )
 
 
+def test_equalisation_members_are_rounding_tolerant_contiguous_slots() -> None:
+    panels = {
+        "first": Rect(0, 0, 296, 300),
+        "second": Rect(302, 1, 296, 299),
+        "second-tab": Rect(302, 1, 296, 299),
+        "third": Rect(604, 0, 296, 300),
+        "disconnected": Rect(1000, 0, 296, 300),
+    }
+
+    assert aligned_layout_members(
+        panels,
+        "second",
+        EqualiseAxis.HORIZONTAL,
+        separator_extent=6,
+    ) == ("first", "second", "third")
+
+
 def test_side_drop_preview_shows_the_new_panels_final_equal_share() -> None:
     panels = {
         "first": Rect(0, 0, 600, 600),
@@ -247,7 +264,7 @@ def test_side_drop_equalises_three_members_in_the_affected_row(dock_workspace, q
     assert [first.width(), second.width(), moved.width()] == user_widths
 
 
-def test_dragging_panel_out_of_row_equalises_remaining_members(dock_workspace, qapp) -> None:
+def test_moving_panel_between_runs_equalises_source_and_destination(dock_workspace, qapp) -> None:
     workspace = dock_workspace.window
     first = dock_workspace.add_panel("first")
     second = dock_workspace.add_panel("second")
@@ -265,6 +282,7 @@ def test_dragging_panel_out_of_row_equalises_remaining_members(dock_workspace, q
     qapp.processEvents()
 
     assert abs(first.width() - second.width()) <= 2
+    assert abs(first.height() - moved.height()) <= 2
 
 
 def test_floating_panel_out_of_row_equalises_remaining_members(dock_workspace, qapp) -> None:
@@ -565,7 +583,7 @@ def test_tab_drop_does_not_equalise_existing_panel_sizes(dock_workspace, qapp) -
     assert (generator.width(), target.width()) == original_widths
 
 
-def test_tab_drop_from_docked_row_does_not_equalise_departed_panels(
+def test_tab_drop_from_docked_row_equalises_departed_panels(
     dock_workspace,
     qapp,
 ) -> None:
@@ -584,14 +602,12 @@ def test_tab_drop_from_docked_row_does_not_equalise_departed_panels(
     qapp.processEvents()
     workspace.resizeDocks([first, second, moved, target], [600, 300, 200, 100], Qt.Horizontal)
     qapp.processEvents()
-    source_ratio = first.width() / second.width()
-
     controller.drop_panel(moved, PanelDropTarget.panel("target", CompassPosition.CENTER))
     qapp.processEvents()
 
     assert moved in workspace.tabifiedDockWidgets(target)
-    assert first.width() > second.width() > target.width()
-    assert abs(first.width() / second.width() - source_ratio) <= 0.02
+    remaining_widths = [first.width(), second.width(), moved.width()]
+    assert max(remaining_widths) - min(remaining_widths) <= 2
 
 
 def test_side_edge_drop_is_outermost_and_spans_workspace_height(dock_workspace, qapp) -> None:
