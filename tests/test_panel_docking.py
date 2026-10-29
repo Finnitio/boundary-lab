@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt, QtMsgType, qInstallMessageHandler
-from PySide6.QtGui import QAction, QKeyEvent, QMouseEvent
+from PySide6.QtGui import QAction, QColor, QImage, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QDockWidget, QMainWindow, QStyle, QTabBar, QWidget
 
 from blab.ui.dock_drag import PanelDockController
@@ -49,6 +49,51 @@ class DockWorkspace:
         controller = PanelDockController(self.window, panels)
         self._controllers.append(controller)
         return controller
+
+    def show(self, qapp) -> None:
+        """Show the native workspace and settle its dock layout."""
+        self.window.show()
+        qapp.processEvents()
+
+    def drag_to_panel_target(
+        self,
+        qapp,
+        controller: PanelDockController,
+        moved: QDockWidget,
+        target_id: str,
+        position: CompassPosition,
+    ) -> PanelDropTarget | None:
+        """Exercise the overlay's start, move, and release path."""
+        controller.start_drag(moved, self.window.mapToGlobal(self.window.rect().center()))
+        target = next(group for group in controller.overlay.eligible_targets if target_id in group.member_ids)
+        rect = compass_target_rects(target.rect)[position]
+        local = QPoint(rect.x + rect.width // 2, rect.y + rect.height // 2)
+        global_cursor = self.window.mapToGlobal(local)
+        QApplication.sendEvent(
+            controller.overlay,
+            QMouseEvent(
+                QEvent.MouseMove,
+                QPointF(local),
+                QPointF(global_cursor),
+                Qt.NoButton,
+                Qt.LeftButton,
+                Qt.NoModifier,
+            ),
+        )
+        active_target = controller.overlay.active_target
+        QApplication.sendEvent(
+            controller.overlay,
+            QMouseEvent(
+                QEvent.MouseButtonRelease,
+                QPointF(local),
+                QPointF(global_cursor),
+                Qt.LeftButton,
+                Qt.NoButton,
+                Qt.NoModifier,
+            ),
+        )
+        qapp.processEvents()
+        return active_target
 
 
 @pytest.fixture
@@ -323,6 +368,34 @@ def test_dense_small_workspace_keeps_compasses_fitted_and_paints_direct_hit_last
             assert group.rect.x <= target.x <= target.right <= group.rect.right
             assert group.rect.y <= target.y <= target.bottom <= group.rect.bottom
     assert {target.panel_id for target in controller.overlay.paint_order[-5:]} == {left_group.panel_id}
+
+    controller.overlay.end()
+    controller.cancel_drag()
+
+
+def test_rendered_target_pen_never_extends_beyond_clickable_shape(
+    dock_workspace,
+    qapp,
+) -> None:
+    workspace = dock_workspace.window
+    target = dock_workspace.add_panel("target")
+    moved = dock_workspace.add_panel("moved")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, target)
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = dock_workspace.controller(target, moved)
+    dock_workspace.show(qapp)
+    group = controller.docked_group_targets()[0]
+    left = compass_target_rects(group.rect)[CompassPosition.LEFT]
+    cursor = workspace.mapToGlobal(QPoint(left.x + left.width // 2, left.y + left.height // 2))
+    controller.start_drag(moved, cursor)
+
+    image = QImage(workspace.size(), QImage.Format_ARGB32_Premultiplied)
+    image.fill(QColor(Qt.transparent))
+    controller.overlay.render(image)
+
+    y = left.y + left.height // 2
+    assert image.pixelColor(left.x - 1, y) == image.pixelColor(left.x - 4, y)
 
     controller.overlay.end()
     controller.cancel_drag()
@@ -755,6 +828,33 @@ def test_drag_targets_are_one_per_visible_group_independent_of_registration_orde
     forward_controller.cancel_drag()
 
 
+def test_inactive_tab_with_stale_geometry_never_supplies_group_rect(
+    dock_workspace,
+    qapp,
+) -> None:
+    workspace = dock_workspace.window
+    inactive = dock_workspace.add_panel("inactive")
+    active = dock_workspace.add_panel("active")
+    neighbour = dock_workspace.add_panel("neighbour")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, inactive)
+    workspace.splitDockWidget(inactive, neighbour, Qt.Horizontal)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, active)
+    workspace.tabifyDockWidget(inactive, active)
+    active.raise_()
+    controller = dock_workspace.controller(inactive, active, neighbour)
+    dock_workspace.show(qapp)
+    active_origin = active.mapTo(workspace, QPoint())
+    visible_rect = Rect(active_origin.x(), active_origin.y(), active.width(), active.height())
+
+    assert active.visibleRegion().isEmpty() is False
+    assert inactive.visibleRegion().isEmpty()
+    assert inactive.geometry() != active.geometry()
+
+    group = next(group for group in controller.docked_group_targets() if "active" in group.member_ids)
+
+    assert group.rect == visible_rect
+
+
 def test_standalone_source_has_no_target_and_floating_source_can_target_docked_group(
     dock_workspace,
     qapp,
@@ -898,6 +998,60 @@ def test_directional_drop_places_panel_beside_whole_tab_group(
     assert is_on_requested_side(moved, target)
     assert moved not in workspace.tabifiedDockWidgets(target)
     assert first_tab in workspace.tabifiedDockWidgets(target)
+
+
+@pytest.mark.parametrize("tabbed_target", [False, True], ids=["standalone", "tab-group"])
+@pytest.mark.parametrize(
+    ("position", "axis"),
+    [
+        (CompassPosition.LEFT, Qt.Horizontal),
+        (CompassPosition.RIGHT, Qt.Horizontal),
+        (CompassPosition.TOP, Qt.Vertical),
+        (CompassPosition.BOTTOM, Qt.Vertical),
+    ],
+)
+def test_overlay_drag_places_and_sizes_panel_on_every_side_of_visible_group(
+    dock_workspace,
+    qapp,
+    tabbed_target,
+    position,
+    axis,
+) -> None:
+    workspace = dock_workspace.window
+    target = dock_workspace.add_panel("target")
+    sibling = dock_workspace.add_panel("sibling")
+    moved = dock_workspace.add_panel("moved")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, target)
+    if tabbed_target:
+        workspace.addDockWidget(Qt.LeftDockWidgetArea, sibling)
+        workspace.tabifyDockWidget(target, sibling)
+        target.raise_()
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    panels = (target, sibling, moved) if tabbed_target else (target, moved)
+    controller = dock_workspace.controller(*panels)
+    dock_workspace.show(qapp)
+
+    active_target = dock_workspace.drag_to_panel_target(qapp, controller, moved, "target", position)
+
+    assert active_target == PanelDropTarget.panel("target", position)
+    assert not moved.isFloating()
+    assert moved not in workspace.tabifiedDockWidgets(target)
+    if tabbed_target:
+        assert sibling in workspace.tabifiedDockWidgets(target)
+    if position == CompassPosition.LEFT:
+        assert moved.x() < target.x()
+    elif position == CompassPosition.RIGHT:
+        assert moved.x() > target.x()
+    elif position == CompassPosition.TOP:
+        assert moved.y() < target.y()
+    else:
+        assert moved.y() > target.y()
+    moved_size = moved.width() if axis == Qt.Horizontal else moved.height()
+    target_size = target.width() if axis == Qt.Horizontal else target.height()
+    if tabbed_target and axis == Qt.Vertical:
+        target_size += next(tab_bar for tab_bar in workspace.findChildren(QTabBar) if tab_bar.isVisible()).height()
+    assert abs(moved_size - target_size) <= 2
 
 
 def test_directional_drop_beside_tab_group_equalises_three_spatial_slots(

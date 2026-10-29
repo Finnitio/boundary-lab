@@ -158,12 +158,15 @@ class PanelDropOverlay(QWidget):
             active = target == self._hovered_target
             color = QColor(highlight if active else neutral)
             color.setAlpha(120 if active else 75)
-            painter.setPen(QPen(highlight if active else neutral, 2 if active else 1))
             rect = _qrect(target_rect)
+            painter.save()
+            painter.setClipRect(rect)
+            painter.setPen(QPen(highlight if active else neutral, 2 if active else 1))
             painter.fillRect(rect, color)
             painter.drawRect(rect)
             if target.position is not None:
                 self._draw_compass_symbol(painter, rect, target.position)
+            painter.restore()
 
     @staticmethod
     def _draw_compass_symbol(
@@ -225,13 +228,19 @@ class PanelDockController:
         self.overlay = PanelDropOverlay(self, workspace)
         self._dragged_panel: QDockWidget | None = None
         self._panels: list[QDockWidget] = []
+        self._panels_by_id: dict[str, QDockWidget] = {}
         for panel in panels:
             self.register_panel(panel)
 
     def register_panel(self, panel: QDockWidget) -> None:
         """Enable custom dragging for one panel's title bar."""
+        panel_id = self._panel_id(panel)
+        existing = self._panels_by_id.get(panel_id)
+        if existing is not None and existing is not panel:
+            raise ValueError(f"Duplicate panel id: {panel_id}")
         if panel not in self._panels:
             self._panels.append(panel)
+        self._panels_by_id[panel_id] = panel
         title_bar = panel.titleBarWidget()
         if title_bar is not None and hasattr(title_bar, "set_dock_controller"):
             title_bar.set_dock_controller(self)
@@ -247,6 +256,39 @@ class PanelDockController:
     @staticmethod
     def _panel_id(panel: QDockWidget) -> str:
         return panel.objectName() or f"panel-{id(panel)}"
+
+    def _panel_for_id(self, panel_id: str | None) -> QDockWidget | None:
+        """Resolve an overlay identity through the controller-owned registry."""
+        if panel_id is None:
+            return None
+        return self._panels_by_id.get(panel_id)
+
+    def _panels_for_ids(self, panel_ids: Iterable[str]) -> list[QDockWidget]:
+        """Resolve registered identities without repeatedly scanning widgets."""
+        return [panel for panel_id in panel_ids if (panel := self._panel_for_id(panel_id)) is not None]
+
+    def _visible_area(self, panel: QDockWidget) -> int:
+        """Return the currently painted area of a panel in workspace pixels."""
+        visible_rect = panel.visibleRegion().boundingRect()
+        return visible_rect.width() * visible_rect.height()
+
+    def _panel_rect(self, panel: QDockWidget) -> Rect:
+        """Return one panel rectangle in workspace coordinates."""
+        origin = panel.mapTo(self.workspace, QPoint())
+        return Rect(origin.x(), origin.y(), panel.width(), panel.height())
+
+    def _geometry_representative(
+        self,
+        panels: Iterable[QDockWidget],
+    ) -> QDockWidget | None:
+        """Choose the actually visible member that represents a group's slot."""
+        visible = [panel for panel in panels if self._visible_area(panel) > 0]
+        return max(visible, key=lambda panel: (self._visible_area(panel), self._panel_id(panel))) if visible else None
+
+    def _group_representative(self, panels: Iterable[QDockWidget]) -> QDockWidget:
+        """Choose a live group identity, preferring its visible member."""
+        candidates = list(panels)
+        return self._geometry_representative(candidates) or min(candidates, key=self._panel_id)
 
     def docked_panel_rects(self) -> dict[str, Rect]:
         """Return one overlay-local rectangle per docked logical group."""
@@ -264,15 +306,7 @@ class PanelDockController:
         for panel in self._panels:
             if panel.isFloating() or panel.isHidden():
                 continue
-            origin = panel.mapTo(self.workspace, QPoint(0, 0))
-            raw_rects[panel] = Rect(origin.x(), origin.y(), panel.width(), panel.height())
-
-        workspace_rect = QRect(QPoint(0, 0), self.workspace.size())
-
-        def visible_area(panel: QDockWidget) -> int:
-            rect = raw_rects[panel]
-            intersection = _qrect(rect).intersected(workspace_rect)
-            return intersection.width() * intersection.height()
+            raw_rects[panel] = self._panel_rect(panel)
 
         targets: list[PanelGroupTarget] = []
         visited: set[QDockWidget] = set()
@@ -293,16 +327,15 @@ class PanelDockController:
                 target_members = target_members - {self._dragged_panel}
             if not target_members:
                 continue
-            donor = max(group, key=lambda item: (visible_area(item), self._panel_id(item)))
-            representative = max(
-                target_members,
-                key=lambda item: (visible_area(item), self._panel_id(item)),
-            )
+            geometry_representative = self._geometry_representative(group)
+            if geometry_representative is None:
+                continue
+            representative = self._group_representative(target_members)
             targets.append(
                 PanelGroupTarget(
                     panel_id=self._panel_id(representative),
                     member_ids=frozenset(self._panel_id(item) for item in target_members),
-                    rect=raw_rects[donor],
+                    rect=raw_rects[geometry_representative],
                 )
             )
         return tuple(sorted(targets, key=lambda target: target.panel_id))
@@ -358,10 +391,7 @@ class PanelDockController:
         """Return a target preview from the logical geometry used by placement."""
         preview_rects = panel_rects
         if target.panel_id is not None:
-            target_panel = next(
-                (panel for panel in self._panels if self._panel_id(panel) == target.panel_id),
-                None,
-            )
+            target_panel = self._panel_for_id(target.panel_id)
             if target_panel is not None:
                 preview_rects = self._rects_with_complete_target_slot(panel_rects, target_panel)
         return drop_preview_rect(
@@ -400,10 +430,7 @@ class PanelDockController:
             departed_groups = self._departed_groups(panel)
             self._drop_at_edge(panel, target.edge, departed_groups)
             return
-        target_panel = next(
-            (candidate for candidate in self._panels if self._panel_id(candidate) == target.panel_id),
-            None,
-        )
+        target_panel = self._panel_for_id(target.panel_id)
         if target_panel is None or target_panel is panel or target_panel.isFloating():
             return
         position = target.position
@@ -471,12 +498,7 @@ class PanelDockController:
             self.workspace.tabifyDockWidget(target_panel, target_tab)
         panel.show()
         self._equalise_departed_groups(departed_groups)
-        members = [
-            candidate
-            for panel_id in member_ids
-            for candidate in self._panels
-            if self._panel_id(candidate) == panel_id and candidate is not panel
-        ]
+        members = [candidate for candidate in self._panels_for_ids(member_ids) if candidate is not panel]
         self.workspace.resizeDocks([*members, panel], [1] * (len(members) + 1), orientation)
         target_panel.raise_()
 
@@ -532,10 +554,7 @@ class PanelDockController:
             members: list[QDockWidget] = []
             seen_tab_groups: set[frozenset[int]] = set()
             for member_id in member_ids:
-                candidate = next(
-                    (item for item in self._panels if self._panel_id(item) == member_id),
-                    None,
-                )
+                candidate = self._panel_for_id(member_id)
                 if candidate is None or candidate is panel:
                     continue
                 tab_group = [candidate, *self.workspace.tabifiedDockWidgets(candidate)]
@@ -543,7 +562,7 @@ class PanelDockController:
                 if tab_group_key in seen_tab_groups:
                     continue
                 seen_tab_groups.add(tab_group_key)
-                representative = next((item for item in tab_group if item.isVisible()), candidate)
+                representative = self._group_representative(tab_group)
                 members.append(representative)
             if len(members) > 1:
                 groups.append((axis, members))
@@ -559,14 +578,7 @@ class PanelDockController:
             representatives: list[QDockWidget] = []
             for member in members:
                 tab_group = [member, *self.workspace.tabifiedDockWidgets(member)]
-
-                def visible_area(candidate: QDockWidget) -> int:
-                    origin = candidate.mapTo(self.workspace, QPoint(0, 0))
-                    candidate_rect = QRect(origin, candidate.size())
-                    visible_rect = candidate_rect.intersected(self.workspace.rect())
-                    return visible_rect.width() * visible_rect.height()
-
-                representative = max(tab_group, key=visible_area)
+                representative = self._group_representative(tab_group)
                 if representative not in representatives:
                     representatives.append(representative)
             self.workspace.resizeDocks(
@@ -595,12 +607,7 @@ class PanelDockController:
         panel.show()
         self.workspace.layout().activate()
         self._equalise_departed_groups(departed_groups)
-        members = [
-            candidate
-            for panel_id in member_ids
-            for candidate in self._panels
-            if self._panel_id(candidate) == panel_id and candidate is not panel
-        ]
+        members = [candidate for candidate in self._panels_for_ids(member_ids) if candidate is not panel]
         size = (self.workspace.width() if orientation == Qt.Horizontal else self.workspace.height()) // (
             len(members) + 1
         )
