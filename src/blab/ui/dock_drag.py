@@ -6,7 +6,7 @@ from collections.abc import Iterable
 
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent, QPainter, QPaintEvent, QPen
-from PySide6.QtWidgets import QDockWidget, QMainWindow, QTabBar, QWidget
+from PySide6.QtWidgets import QDockWidget, QMainWindow, QStyle, QTabBar, QWidget
 
 from blab.ui.dock_targets import (
     CompassPosition,
@@ -202,6 +202,9 @@ class PanelDockController:
             rects[self._panel_id(panel)] = Rect(origin.x(), origin.y(), panel.width(), panel.height())
         return rects
 
+    def _separator_extent(self) -> int:
+        return self.workspace.style().pixelMetric(QStyle.PM_DockWidgetSeparatorExtent)
+
     def _panel_slot_rect(self, panel: QDockWidget, rect: Rect) -> Rect:
         """Include the native tab bar in a tab group's spatial slot."""
         if not self.workspace.tabifiedDockWidgets(panel):
@@ -272,11 +275,13 @@ class PanelDockController:
             return
         position = target.position
         if position == CompassPosition.CENTER:
+            departed_groups = self._departed_groups(panel)
             self.workspace.removeDockWidget(panel)
             self.workspace.addDockWidget(self.workspace.dockWidgetArea(target_panel), panel)
             self.workspace.tabifyDockWidget(target_panel, panel)
             panel.show()
             panel.raise_()
+            self._equalise_departed_groups(departed_groups)
             return
         if position is None:
             return
@@ -297,6 +302,7 @@ class PanelDockController:
             panel_rects,
             target_panel_id,
             axis,
+            separator_extent=self._separator_extent(),
         )
         target_tabs = self.workspace.tabifiedDockWidgets(target_panel)
         for target_tab in target_tabs:
@@ -367,7 +373,12 @@ class PanelDockController:
         panel_rects = self.docked_panel_rects()
         groups: list[tuple[EqualiseAxis, list[QDockWidget]]] = []
         for axis in (EqualiseAxis.HORIZONTAL, EqualiseAxis.VERTICAL):
-            member_ids = aligned_layout_members(panel_rects, panel_id, axis)
+            member_ids = aligned_layout_members(
+                panel_rects,
+                panel_id,
+                axis,
+                separator_extent=self._separator_extent(),
+            )
             if len(member_ids) <= 1:
                 continue
             members: list[QDockWidget] = []
@@ -397,7 +408,24 @@ class PanelDockController:
         self.workspace.layout().activate()
         for axis, members in groups:
             orientation = _orientation(axis)
-            self.workspace.resizeDocks(members, [1] * len(members), orientation)
+            representatives: list[QDockWidget] = []
+            for member in members:
+                tab_group = [member, *self.workspace.tabifiedDockWidgets(member)]
+
+                def visible_area(candidate: QDockWidget) -> int:
+                    origin = candidate.mapTo(self.workspace, QPoint(0, 0))
+                    candidate_rect = QRect(origin, candidate.size())
+                    visible_rect = candidate_rect.intersected(self.workspace.rect())
+                    return visible_rect.width() * visible_rect.height()
+
+                representative = max(tab_group, key=visible_area)
+                if representative not in representatives:
+                    representatives.append(representative)
+            self.workspace.resizeDocks(
+                representatives,
+                [1] * len(representatives),
+                orientation,
+            )
 
     def _drop_at_edge(
         self,

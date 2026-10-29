@@ -190,23 +190,45 @@ def aligned_layout_members(
     panel_rects: Mapping[str, Rect],
     anchor_panel_id: str,
     axis: EqualiseAxis,
+    *,
+    separator_extent: int = 0,
 ) -> tuple[str, ...]:
-    """Return one representative per logical group aligned with ``anchor``."""
+    """Return the contiguous logical run containing ``anchor``.
+
+    Native dock layouts may round sibling geometry by one pixel and place a
+    style-defined separator between adjacent slots. Coincidentally aligned
+    slots beyond that separator do not belong to the affected run.
+    """
     anchor = panel_rects.get(anchor_panel_id)
     if anchor is None:
         return ()
 
     def is_aligned(rect: Rect) -> bool:
         if axis == EqualiseAxis.HORIZONTAL:
-            return (rect.y, rect.height) == (anchor.y, anchor.height)
-        return (rect.x, rect.width) == (anchor.x, anchor.width)
+            return abs(rect.y - anchor.y) <= 1 and abs(rect.bottom - anchor.bottom) <= 1
+        return abs(rect.x - anchor.x) <= 1 and abs(rect.right - anchor.right) <= 1
 
     representatives: dict[Rect, str] = {anchor: anchor_panel_id}
     for panel_id, rect in panel_rects.items():
         if is_aligned(rect) and rect not in representatives:
             representatives[rect] = panel_id
     coordinate = (lambda item: item[0].x) if axis == EqualiseAxis.HORIZONTAL else (lambda item: item[0].y)
-    return tuple(panel_id for _, panel_id in sorted(representatives.items(), key=coordinate))
+    ordered = sorted(representatives.items(), key=coordinate)
+    anchor_index = next(index for index, (rect, _) in enumerate(ordered) if rect == anchor)
+
+    def gap(left: Rect, right: Rect) -> int:
+        if axis == EqualiseAxis.HORIZONTAL:
+            return right.x - left.right
+        return right.y - left.bottom
+
+    maximum_gap = max(0, separator_extent) + 1
+    start = anchor_index
+    while start > 0 and -1 <= gap(ordered[start - 1][0], ordered[start][0]) <= maximum_gap:
+        start -= 1
+    end = anchor_index + 1
+    while end < len(ordered) and -1 <= gap(ordered[end - 1][0], ordered[end][0]) <= maximum_gap:
+        end += 1
+    return tuple(panel_id for _, panel_id in ordered[start:end])
 
 
 def top_level_layout_members(
