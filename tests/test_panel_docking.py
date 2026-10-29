@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt, QtMsgType, qInstallMessageHandler
 from PySide6.QtGui import QAction, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import QApplication, QDockWidget, QMainWindow, QWidget
 
@@ -262,6 +262,38 @@ def test_side_drop_equalises_three_members_in_the_affected_row(dock_workspace, q
     qapp.processEvents()
     assert first.width() > second.width() > moved.width()
     assert [first.width(), second.width(), moved.width()] == user_widths
+
+
+def test_side_drop_respects_minimum_size_without_qt_warnings(dock_workspace, qapp) -> None:
+    workspace = dock_workspace.window
+    constrained = dock_workspace.add_panel("constrained")
+    constrained.widget().setMinimumWidth(500)
+    target = dock_workspace.add_panel("target")
+    moved = dock_workspace.add_panel("moved")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, constrained)
+    workspace.splitDockWidget(constrained, target, Qt.Horizontal)
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = dock_workspace.controller(constrained, target, moved)
+    workspace.show()
+    qapp.processEvents()
+
+    warnings: list[str] = []
+
+    def record_warning(message_type, _context, message) -> None:
+        if message_type == QtMsgType.QtWarningMsg and message != "This plugin does not support propagateSizeHints()":
+            warnings.append(message)
+
+    previous_handler = qInstallMessageHandler(record_warning)
+    try:
+        controller.drop_panel(moved, PanelDropTarget.panel("target", CompassPosition.RIGHT))
+        qapp.processEvents()
+    finally:
+        qInstallMessageHandler(previous_handler)
+
+    assert constrained.width() >= 500
+    assert abs(target.width() - moved.width()) <= 2
+    assert warnings == []
 
 
 def test_moving_panel_between_runs_equalises_source_and_destination(dock_workspace, qapp) -> None:
