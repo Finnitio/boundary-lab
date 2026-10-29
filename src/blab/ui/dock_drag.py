@@ -6,7 +6,7 @@ from collections.abc import Iterable
 
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent, QPainter, QPaintEvent, QPen
-from PySide6.QtWidgets import QDockWidget, QMainWindow, QWidget
+from PySide6.QtWidgets import QDockWidget, QMainWindow, QTabBar, QWidget
 
 from blab.ui.dock_targets import (
     CompassPosition,
@@ -202,6 +202,32 @@ class PanelDockController:
             rects[self._panel_id(panel)] = Rect(origin.x(), origin.y(), panel.width(), panel.height())
         return rects
 
+    def _panel_slot_rect(self, panel: QDockWidget, rect: Rect) -> Rect:
+        """Include the native tab bar in a tab group's spatial slot."""
+        if not self.workspace.tabifiedDockWidgets(panel):
+            return rect
+        for tab_bar in self.workspace.findChildren(QTabBar):
+            if not tab_bar.isVisible():
+                continue
+            origin = tab_bar.mapTo(self.workspace, QPoint(0, 0))
+            tab_rect = Rect(origin.x(), origin.y(), tab_bar.width(), tab_bar.height())
+            touches_horizontally = (tab_rect.x, tab_rect.width) == (rect.x, rect.width) and (
+                tab_rect.y == rect.bottom or tab_rect.bottom == rect.y
+            )
+            touches_vertically = (tab_rect.y, tab_rect.height) == (rect.y, rect.height) and (
+                tab_rect.x == rect.right or tab_rect.right == rect.x
+            )
+            if touches_horizontally or touches_vertically:
+                left = min(rect.x, tab_rect.x)
+                top = min(rect.y, tab_rect.y)
+                return Rect(
+                    left,
+                    top,
+                    max(rect.right, tab_rect.right) - left,
+                    max(rect.bottom, tab_rect.bottom) - top,
+                )
+        return rect
+
     def dragged_group_ids(self) -> set[str]:
         """Exclude the dragged panel and the tabs occupying its current position."""
         if self._dragged_panel is None or self._dragged_panel.isFloating():
@@ -262,21 +288,33 @@ class PanelDockController:
         orientation = _orientation(axis)
         panel_rects = self.docked_panel_rects()
         panel_rects.pop(self._panel_id(panel), None)
+        target_panel_id = self._panel_id(target_panel)
+        panel_rects[target_panel_id] = self._panel_slot_rect(
+            target_panel,
+            panel_rects[target_panel_id],
+        )
         member_ids = aligned_layout_members(
             panel_rects,
-            self._panel_id(target_panel),
+            target_panel_id,
             axis,
         )
         target_tabs = self.workspace.tabifiedDockWidgets(target_panel)
+        for target_tab in target_tabs:
+            self.workspace.removeDockWidget(target_tab)
         panel.setFloating(False)
         area = self.workspace.dockWidgetArea(target_panel)
         self.workspace.addDockWidget(area, panel, orientation)
         if placement.before:
             self.workspace.splitDockWidget(panel, target_panel, orientation)
+        elif target_tabs:
+            self.workspace.splitDockWidget(panel, target_panel, orientation)
+            self.workspace.splitDockWidget(target_panel, panel, orientation)
         else:
             self.workspace.splitDockWidget(target_panel, panel, orientation)
-        if target_tabs:
-            self.workspace.tabifyDockWidget(target_tabs[0], target_panel)
+        for target_tab in target_tabs:
+            self.workspace.addDockWidget(area, target_tab, orientation)
+            target_tab.show()
+            self.workspace.tabifyDockWidget(target_panel, target_tab)
         panel.show()
         self._equalise_departed_groups(departed_groups)
         members = [

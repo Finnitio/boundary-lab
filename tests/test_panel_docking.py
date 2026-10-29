@@ -211,6 +211,7 @@ def test_public_drop_entry_point_places_panel_on_each_side(dock_workspace, qapp)
         qapp.processEvents()
 
         assert is_on_requested_side(moved, target), position
+        assert moved not in workspace.tabifiedDockWidgets(target), position
         workspace.removeDockWidget(moved)
         workspace.removeDockWidget(target)
         moved.deleteLater()
@@ -424,6 +425,97 @@ def test_public_drop_entry_point_tabs_panel_with_target(dock_workspace, qapp) ->
     qapp.processEvents()
 
     assert moved in workspace.tabifiedDockWidgets(target)
+
+
+@pytest.mark.parametrize(
+    ("position", "is_on_requested_side"),
+    [
+        (CompassPosition.LEFT, lambda moved, target: moved.x() < target.x()),
+        (CompassPosition.RIGHT, lambda moved, target: moved.x() > target.x()),
+        (CompassPosition.TOP, lambda moved, target: moved.y() < target.y()),
+        (CompassPosition.BOTTOM, lambda moved, target: moved.y() > target.y()),
+    ],
+)
+def test_directional_drop_places_panel_beside_whole_tab_group(
+    dock_workspace,
+    qapp,
+    position,
+    is_on_requested_side,
+) -> None:
+    workspace = dock_workspace.window
+    first_tab = dock_workspace.add_panel("first-tab")
+    target = dock_workspace.add_panel("target")
+    moved = dock_workspace.add_panel("moved")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, first_tab)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, target)
+    workspace.tabifyDockWidget(first_tab, target)
+    target.raise_()
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = dock_workspace.controller(first_tab, target, moved)
+    workspace.show()
+    qapp.processEvents()
+
+    controller.drop_panel(moved, PanelDropTarget.panel("target", position))
+    qapp.processEvents()
+
+    assert is_on_requested_side(moved, target)
+    assert moved not in workspace.tabifiedDockWidgets(target)
+    assert first_tab in workspace.tabifiedDockWidgets(target)
+
+
+def test_directional_drop_beside_tab_group_equalises_three_spatial_slots(
+    dock_workspace,
+    qapp,
+) -> None:
+    workspace = dock_workspace.window
+    first = dock_workspace.add_panel("first")
+    first_tab = dock_workspace.add_panel("first-tab")
+    target = dock_workspace.add_panel("target")
+    moved = dock_workspace.add_panel("moved")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, first)
+    workspace.splitDockWidget(first, first_tab, Qt.Horizontal)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, target)
+    workspace.tabifyDockWidget(first_tab, target)
+    target.raise_()
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = dock_workspace.controller(first, first_tab, target, moved)
+    workspace.show()
+    qapp.processEvents()
+
+    controller.drop_panel(moved, PanelDropTarget.panel("target", CompassPosition.RIGHT))
+    qapp.processEvents()
+
+    widths = [first.width(), target.width(), moved.width()]
+    assert max(widths) - min(widths) <= 2
+    assert moved.x() > target.x()
+    assert moved not in workspace.tabifiedDockWidgets(target)
+    assert first_tab in workspace.tabifiedDockWidgets(target)
+
+
+@pytest.mark.parametrize("position", [CompassPosition.RIGHT, CompassPosition.CENTER])
+def test_tab_group_drop_state_round_trips(dock_workspace, qapp, position) -> None:
+    workspace = dock_workspace.window
+    first_tab = dock_workspace.add_panel("first-tab")
+    target = dock_workspace.add_panel("target")
+    moved = dock_workspace.add_panel("moved")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, first_tab)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, target)
+    workspace.tabifyDockWidget(first_tab, target)
+    target.raise_()
+    workspace.addDockWidget(Qt.RightDockWidgetArea, moved)
+    moved.setFloating(True)
+    controller = dock_workspace.controller(first_tab, target, moved)
+    workspace.show()
+    qapp.processEvents()
+
+    controller.drop_panel(moved, PanelDropTarget.panel("target", position))
+    qapp.processEvents()
+
+    state = workspace.saveState()
+    assert not state.isEmpty()
+    assert workspace.restoreState(state)
 
 
 def test_tab_group_counts_as_one_member_when_side_drop_is_equalised(
