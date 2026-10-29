@@ -18,11 +18,11 @@ from blab.ui.dock_targets import (
     Rect,
     aligned_layout_members,
     compass_placement,
-    compass_target_rects,
     drop_preview_rect,
+    drop_target_rects,
     edge_placement,
-    edge_target_rects,
-    resolve_drop_target,
+    resolve_target_rects,
+    target_paint_order,
     top_level_layout_members,
 )
 
@@ -79,6 +79,11 @@ class PanelDropOverlay(QWidget):
         return self._hovered_target
 
     @property
+    def paint_order(self) -> tuple[PanelDropTarget, ...]:
+        """Return current targets in their back-to-front visual order."""
+        return target_paint_order(self._target_rects, self._hovered_target)
+
+    @property
     def preview_rect(self) -> Rect | None:
         """Return the active target's expected final landing area."""
         return self._preview_rect
@@ -102,15 +107,8 @@ class PanelDropOverlay(QWidget):
         cursor = Point(local.x(), local.y())
         self._eligible_targets = self._controller.docked_group_targets()
         self._panel_rects = {target.panel_id: target.rect for target in self._eligible_targets}
-        self._target_rects = {
-            **{PanelDropTarget.outer(edge): rect for edge, rect in edge_target_rects(workspace).items()},
-            **{
-                PanelDropTarget.panel(panel_id, position): rect
-                for panel_id, panel_rect in self._panel_rects.items()
-                for position, rect in compass_target_rects(panel_rect).items()
-            },
-        }
-        self._hovered_target = resolve_drop_target(cursor, workspace, self._panel_rects)
+        self._target_rects = drop_target_rects(workspace, self._panel_rects)
+        self._hovered_target = resolve_target_rects(cursor, self._target_rects)
         self._preview_rect = (
             self._controller.drop_preview_rect(
                 workspace,
@@ -155,13 +153,13 @@ class PanelDropOverlay(QWidget):
         painter = QPainter(self)
         if self._preview_rect is not None:
             painter.fillRect(_qrect(self._preview_rect), preview_fill)
-        for target, target_rect in self._target_rects.items():
+        for target in self.paint_order:
+            target_rect = self._target_rects[target]
             active = target == self._hovered_target
             color = QColor(highlight if active else neutral)
             color.setAlpha(120 if active else 75)
             painter.setPen(QPen(highlight if active else neutral, 2 if active else 1))
-            inset = 5 if target.edge is not None else 3
-            rect = _qrect(target_rect).adjusted(inset, inset, -inset, -inset)
+            rect = _qrect(target_rect)
             painter.fillRect(rect, color)
             painter.drawRect(rect)
             if target.position is not None:
@@ -174,6 +172,8 @@ class PanelDropOverlay(QWidget):
         position: CompassPosition,
     ) -> None:
         """Draw a theme-colored arrow or tab glyph inside one compass target."""
+        if min(rect.width(), rect.height()) < 8:
+            return
         centre = rect.center()
         span = max(3, min(rect.width(), rect.height()) // 4)
         if position == CompassPosition.CENTER:
