@@ -83,6 +83,15 @@ class PanelDropTarget:
 
 
 @dataclass(frozen=True)
+class PanelGroupTarget:
+    """One visible docked tab group represented by a live panel."""
+
+    panel_id: str
+    member_ids: frozenset[str]
+    rect: Rect
+
+
+@dataclass(frozen=True)
 class Point:
     x: int
     y: int
@@ -288,6 +297,7 @@ __all__ = [
     "Edge",
     "EqualiseAxis",
     "PanelDropTarget",
+    "PanelGroupTarget",
     "Point",
     "Rect",
     "compass_target_rects",

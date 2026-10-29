@@ -18,6 +18,7 @@ from blab.ui.dock_targets import (
     Point,
     Rect,
     aligned_layout_members,
+    compass_target_rects,
     panel_preview_rect,
     resolve_drop_target,
     resolve_outer_edge_target,
@@ -475,6 +476,180 @@ def test_public_drop_entry_point_tabs_panel_with_target(dock_workspace, qapp) ->
     qapp.processEvents()
 
     assert moved in workspace.tabifiedDockWidgets(target)
+
+
+def test_drag_targets_are_one_per_visible_group_independent_of_registration_order(
+    dock_workspace,
+    qapp,
+) -> None:
+    workspace = dock_workspace.window
+    dragged = dock_workspace.add_panel("dragged")
+    source_sibling = dock_workspace.add_panel("source-sibling")
+    inactive_target = dock_workspace.add_panel("inactive-target")
+    active_target = dock_workspace.add_panel("active-target")
+    standalone = dock_workspace.add_panel("standalone")
+    floating = dock_workspace.add_panel("floating")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, dragged)
+    workspace.splitDockWidget(dragged, inactive_target, Qt.Horizontal)
+    workspace.splitDockWidget(inactive_target, standalone, Qt.Vertical)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, source_sibling)
+    workspace.tabifyDockWidget(dragged, source_sibling)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, active_target)
+    workspace.tabifyDockWidget(inactive_target, active_target)
+    active_target.raise_()
+    workspace.addDockWidget(Qt.RightDockWidgetArea, floating)
+    floating.setFloating(True)
+    controller = dock_workspace.controller(
+        floating,
+        standalone,
+        active_target,
+        inactive_target,
+        source_sibling,
+        dragged,
+    )
+    workspace.show()
+    qapp.processEvents()
+
+    controller.start_drag(dragged, dragged.mapToGlobal(dragged.rect().center()))
+    targets = controller.overlay.eligible_targets
+
+    assert {target.member_ids for target in targets} == {
+        frozenset({"source-sibling"}),
+        frozenset({"inactive-target", "active-target"}),
+        frozenset({"standalone"}),
+    }
+    source_target = next(target for target in targets if target.member_ids == {"source-sibling"})
+    for position, rect in compass_target_rects(source_target.rect).items():
+        cursor = Point(rect.x + rect.width // 2, rect.y + rect.height // 2)
+        assert resolve_drop_target(cursor, Rect(0, 0, 900, 600), {source_target.panel_id: source_target.rect}) == (
+            PanelDropTarget.panel(source_target.panel_id, position)
+        )
+
+    controller.overlay.end()
+    controller.cancel_drag()
+
+    forward_controller = dock_workspace.controller(
+        dragged,
+        source_sibling,
+        inactive_target,
+        active_target,
+        standalone,
+        floating,
+    )
+    forward_controller.start_drag(dragged, dragged.mapToGlobal(dragged.rect().center()))
+    assert {
+        (target.panel_id, target.member_ids, target.rect) for target in forward_controller.overlay.eligible_targets
+    } == {(target.panel_id, target.member_ids, target.rect) for target in targets}
+    forward_controller.overlay.end()
+    forward_controller.cancel_drag()
+
+
+def test_standalone_source_has_no_target_and_floating_source_can_target_docked_group(
+    dock_workspace,
+    qapp,
+) -> None:
+    workspace = dock_workspace.window
+    docked = dock_workspace.add_panel("docked")
+    standalone = dock_workspace.add_panel("standalone")
+    floating = dock_workspace.add_panel("floating")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, docked)
+    workspace.splitDockWidget(docked, standalone, Qt.Horizontal)
+    workspace.addDockWidget(Qt.RightDockWidgetArea, floating)
+    floating.setFloating(True)
+    controller = dock_workspace.controller(floating, standalone, docked)
+    workspace.show()
+    qapp.processEvents()
+
+    controller.start_drag(standalone, standalone.mapToGlobal(standalone.rect().center()))
+    assert {target.member_ids for target in controller.overlay.eligible_targets} == {frozenset({"docked"})}
+    controller.overlay.end()
+    controller.cancel_drag()
+
+    controller.start_drag(floating, workspace.mapToGlobal(workspace.rect().center()))
+    assert {target.member_ids for target in controller.overlay.eligible_targets} == {
+        frozenset({"docked"}),
+        frozenset({"standalone"}),
+    }
+    controller.overlay.end()
+    controller.cancel_drag()
+
+
+@pytest.mark.parametrize(
+    ("position", "is_on_requested_side"),
+    [
+        (CompassPosition.LEFT, lambda moved, target: moved.x() < target.x()),
+        (CompassPosition.RIGHT, lambda moved, target: moved.x() > target.x()),
+        (CompassPosition.TOP, lambda moved, target: moved.y() < target.y()),
+        (CompassPosition.BOTTOM, lambda moved, target: moved.y() > target.y()),
+    ],
+)
+def test_remaining_source_group_accepts_directional_drop(
+    dock_workspace,
+    qapp,
+    position,
+    is_on_requested_side,
+) -> None:
+    workspace = dock_workspace.window
+    dragged = dock_workspace.add_panel("dragged")
+    source_sibling = dock_workspace.add_panel("source-sibling")
+    other = dock_workspace.add_panel("other")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, dragged)
+    workspace.splitDockWidget(dragged, other, Qt.Horizontal)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, source_sibling)
+    workspace.tabifyDockWidget(dragged, source_sibling)
+    dragged.raise_()
+    controller = dock_workspace.controller(dragged, source_sibling, other)
+    workspace.show()
+    qapp.processEvents()
+
+    controller.drop_panel(dragged, PanelDropTarget.panel("source-sibling", position))
+    qapp.processEvents()
+
+    assert is_on_requested_side(dragged, source_sibling)
+    assert dragged not in workspace.tabifiedDockWidgets(source_sibling)
+
+
+def test_centre_drop_back_on_source_group_preserves_spatial_sizes(dock_workspace, qapp) -> None:
+    workspace = dock_workspace.window
+    dragged = dock_workspace.add_panel("dragged")
+    source_sibling = dock_workspace.add_panel("source-sibling")
+    other = dock_workspace.add_panel("other")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, dragged)
+    workspace.splitDockWidget(dragged, other, Qt.Horizontal)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, source_sibling)
+    workspace.tabifyDockWidget(dragged, source_sibling)
+    dragged.raise_()
+    controller = dock_workspace.controller(dragged, source_sibling, other)
+    workspace.show()
+    qapp.processEvents()
+    workspace.resizeDocks([dragged, other], [650, 250], Qt.Horizontal)
+    qapp.processEvents()
+    original_widths = (source_sibling.width(), other.width())
+
+    controller.drop_panel(dragged, PanelDropTarget.panel("source-sibling", CompassPosition.CENTER))
+    qapp.processEvents()
+
+    assert dragged in workspace.tabifiedDockWidgets(source_sibling)
+    assert (source_sibling.width(), other.width()) == original_widths
+
+
+def test_escape_from_source_group_drag_preserves_native_layout_state(dock_workspace, qapp) -> None:
+    workspace = dock_workspace.window
+    dragged = dock_workspace.add_panel("dragged")
+    source_sibling = dock_workspace.add_panel("source-sibling")
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, dragged)
+    workspace.addDockWidget(Qt.LeftDockWidgetArea, source_sibling)
+    workspace.tabifyDockWidget(dragged, source_sibling)
+    dragged.raise_()
+    controller = dock_workspace.controller(dragged, source_sibling)
+    workspace.show()
+    qapp.processEvents()
+    original_state = workspace.saveState()
+
+    controller.start_drag(dragged, dragged.mapToGlobal(dragged.rect().center()))
+    controller.overlay.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
+
+    assert workspace.saveState() == original_state
 
 
 @pytest.mark.parametrize(
