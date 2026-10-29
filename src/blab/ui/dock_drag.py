@@ -13,6 +13,7 @@ from blab.ui.dock_targets import (
     Edge,
     EqualiseAxis,
     PanelDropTarget,
+    PanelGroupTarget,
     Point,
     Rect,
     aligned_layout_members,
@@ -46,6 +47,7 @@ class PanelDropOverlay(QWidget):
         self._hovered_target: PanelDropTarget | None = None
         self._compass_panel_id: str | None = None
         self._panel_rects: dict[str, Rect] = {}
+        self._eligible_targets: tuple[PanelGroupTarget, ...] = ()
         self.setObjectName("panelDropOverlay")
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -62,6 +64,11 @@ class PanelDropOverlay(QWidget):
         self.grabKeyboard()
         self._update_hover(global_cursor)
 
+    @property
+    def eligible_targets(self) -> tuple[PanelGroupTarget, ...]:
+        """Return the logical panel groups available to the active drag."""
+        return self._eligible_targets
+
     def end(self) -> None:
         if self.mouseGrabber() is self:
             self.releaseMouse()
@@ -71,16 +78,17 @@ class PanelDropOverlay(QWidget):
         self._hovered_target = None
         self._compass_panel_id = None
         self._panel_rects = {}
+        self._eligible_targets = ()
         self.hide()
 
     def _update_hover(self, global_cursor: QPoint) -> None:
         local = self.mapFromGlobal(global_cursor)
         workspace = Rect(0, 0, self.width(), self.height())
         cursor = Point(local.x(), local.y())
-        self._panel_rects = self._controller.docked_panel_rects()
-        excluded = self._controller.dragged_group_ids()
-        self._compass_panel_id = panel_under_cursor(cursor, self._panel_rects, excluded)
-        self._hovered_target = resolve_drop_target(cursor, workspace, self._panel_rects, excluded)
+        self._eligible_targets = self._controller.docked_group_targets()
+        self._panel_rects = {target.panel_id: target.rect for target in self._eligible_targets}
+        self._compass_panel_id = panel_under_cursor(cursor, self._panel_rects)
+        self._hovered_target = resolve_drop_target(cursor, workspace, self._panel_rects)
         self.update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
@@ -118,10 +126,7 @@ class PanelDropOverlay(QWidget):
         painter = QPainter(self)
         painter.setPen(QPen(highlight, 2))
         if self._hovered_target is not None:
-            excluded = self._controller.dragged_group_ids()
-            preview_panel_rects = {
-                panel_id: rect for panel_id, rect in self._panel_rects.items() if panel_id not in excluded
-            }
+            preview_panel_rects = self._panel_rects
             if self._hovered_target.edge is not None:
                 placement = edge_placement(self._hovered_target.edge)
                 member_count = len(top_level_layout_members(preview_panel_rects, placement.axis))
@@ -193,14 +198,63 @@ class PanelDockController:
         return panel.objectName() or f"panel-{id(panel)}"
 
     def docked_panel_rects(self) -> dict[str, Rect]:
-        """Return overlay-local geometry for eligible docked panels."""
-        rects: dict[str, Rect] = {}
+        """Return one overlay-local rectangle per docked logical group."""
+        return {target.panel_id: target.rect for target in self.docked_group_targets(include_dragged=True)}
+
+    def docked_group_targets(
+        self,
+        *,
+        include_dragged: bool = False,
+    ) -> tuple[PanelGroupTarget, ...]:
+        """Return one deterministic target for each visible docked panel group."""
+        eligible = [panel for panel in self._panels if not panel.isFloating() and not panel.isHidden()]
+        eligible_set = set(eligible)
+        raw_rects: dict[QDockWidget, Rect] = {}
         for panel in self._panels:
             if panel.isFloating() or panel.isHidden():
                 continue
             origin = panel.mapTo(self.workspace, QPoint(0, 0))
-            rects[self._panel_id(panel)] = Rect(origin.x(), origin.y(), panel.width(), panel.height())
-        return rects
+            raw_rects[panel] = Rect(origin.x(), origin.y(), panel.width(), panel.height())
+
+        workspace_rect = QRect(QPoint(0, 0), self.workspace.size())
+
+        def visible_area(panel: QDockWidget) -> int:
+            rect = raw_rects[panel]
+            intersection = _qrect(rect).intersected(workspace_rect)
+            return intersection.width() * intersection.height()
+
+        targets: list[PanelGroupTarget] = []
+        visited: set[QDockWidget] = set()
+        for panel in sorted(eligible, key=self._panel_id):
+            if panel in visited:
+                continue
+            group = {panel}
+            frontier = [panel]
+            while frontier:
+                member = frontier.pop()
+                for sibling in self.workspace.tabifiedDockWidgets(member):
+                    if sibling in eligible_set and sibling not in group:
+                        group.add(sibling)
+                        frontier.append(sibling)
+            visited.update(group)
+            target_members = group
+            if not include_dragged and self._dragged_panel in target_members:
+                target_members = target_members - {self._dragged_panel}
+            if not target_members:
+                continue
+            donor = max(group, key=lambda item: (visible_area(item), self._panel_id(item)))
+            representative = max(
+                target_members,
+                key=lambda item: (visible_area(item), self._panel_id(item)),
+            )
+            targets.append(
+                PanelGroupTarget(
+                    panel_id=self._panel_id(representative),
+                    member_ids=frozenset(self._panel_id(item) for item in target_members),
+                    rect=raw_rects[donor],
+                )
+            )
+        return tuple(sorted(targets, key=lambda target: target.panel_id))
 
     def _separator_extent(self) -> int:
         return self.workspace.style().pixelMetric(QStyle.PM_DockWidgetSeparatorExtent)
@@ -230,13 +284,6 @@ class PanelDockController:
                     max(rect.bottom, tab_rect.bottom) - top,
                 )
         return rect
-
-    def dragged_group_ids(self) -> set[str]:
-        """Exclude the dragged panel and the tabs occupying its current position."""
-        if self._dragged_panel is None or self._dragged_panel.isFloating():
-            return set()
-        group = [self._dragged_panel, *self.workspace.tabifiedDockWidgets(self._dragged_panel)]
-        return {self._panel_id(panel) for panel in group}
 
     def finish_drag(
         self,
@@ -275,6 +322,9 @@ class PanelDockController:
             return
         position = target.position
         if position == CompassPosition.CENTER:
+            if target_panel in self.workspace.tabifiedDockWidgets(panel):
+                panel.raise_()
+                return
             departed_groups = self._departed_groups(panel)
             self.workspace.removeDockWidget(panel)
             self.workspace.addDockWidget(self.workspace.dockWidgetArea(target_panel), panel)
@@ -291,12 +341,24 @@ class PanelDockController:
         departed_groups = self._departed_groups(panel)
         axis = placement.axis
         orientation = _orientation(axis)
-        panel_rects = self.docked_panel_rects()
-        panel_rects.pop(self._panel_id(panel), None)
+        logical_groups = self.docked_group_targets(include_dragged=True)
+        panel_id = self._panel_id(panel)
+        panel_rects: dict[str, Rect] = {}
+        for group in logical_groups:
+            representative = group.panel_id
+            if panel_id in group.member_ids:
+                remaining_ids = group.member_ids - {panel_id}
+                if not remaining_ids:
+                    continue
+                representative = min(remaining_ids)
+            panel_rects[representative] = group.rect
         target_panel_id = self._panel_id(target_panel)
+        target_group = next(group for group in logical_groups if target_panel_id in group.member_ids)
+        for member_id in target_group.member_ids:
+            panel_rects.pop(member_id, None)
         panel_rects[target_panel_id] = self._panel_slot_rect(
             target_panel,
-            panel_rects[target_panel_id],
+            target_group.rect,
         )
         member_ids = aligned_layout_members(
             panel_rects,
@@ -304,7 +366,9 @@ class PanelDockController:
             axis,
             separator_extent=self._separator_extent(),
         )
-        target_tabs = self.workspace.tabifiedDockWidgets(target_panel)
+        target_tabs = [
+            target_tab for target_tab in self.workspace.tabifiedDockWidgets(target_panel) if target_tab is not panel
+        ]
         for target_tab in target_tabs:
             self.workspace.removeDockWidget(target_tab)
         panel.setFloating(False)
