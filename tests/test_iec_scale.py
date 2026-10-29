@@ -321,7 +321,9 @@ def test_spinorama_legend_clicks_keep_toggling_curves_in_both_placements(size) -
     [((12.0, 4.2), True), ((5.2, 4.2), False)],
     ids=["right", "bottom"],
 )
-def test_spinorama_image_export_uses_the_placement_rule_for_the_image_size(tmp_path, image_size, expected_right) -> None:
+def test_spinorama_image_export_uses_the_placement_rule_for_the_image_size(
+    tmp_path, image_size, expected_right
+) -> None:
     canvas = _shown(_spinorama(), width=900, height=420)
     placements = []
     try:

@@ -1389,9 +1389,7 @@ class RawCoordinatePlotCanvas(InteractivePlotCanvas):
             value = interpolate_log_frequency(line.get_xdata(), line.get_ydata(), freq_hz, period=curve.period)
             if value is None:
                 continue
-            text = (
-                self._format_crosshair_y(value) if line.axes is self.axes else self._format_secondary_marker_y(value)
-            )
+            text = self._format_crosshair_y(value) if line.axes is self.axes else self._format_secondary_marker_y(value)
             rows.append(MarkerReadoutRow(curve.label, line.get_color(), text, line.get_linestyle()))
         rows.append(MarkerReadoutRow("Frequency", "none", format_plot_frequency(freq_hz), "None"))
         display_x = self.axes.transData.transform((self.frequency_to_axis_x(freq_hz), 0.0))
@@ -2301,17 +2299,15 @@ class SpinoramaCanvas(IecScaleCanvasMixin, RawCoordinatePlotCanvas):
             dark_background=application_palette_is_dark() or plot_background_is_dark(self.axes)
         )
         labels = tuple(series.label for series in (*spl_series, *di_series))
-        self._series_identity_by_label = {
-            series.label: series.identity for series in (*spl_series, *di_series)
-        }
+        self._series_identity_by_label = {series.label: series.identity for series in (*spl_series, *di_series)}
         if labels != self._series_labels:
             self._right_legend_size_inches = None
             for line in (*self._spl_lines.values(), *self._di_lines.values()):
                 line.remove()
             self._spl_lines = {
-                series.label: self.axes.plot(
-                    [], [], linewidth=1.5, label=series.label, color=colors[series.identity]
-                )[0]
+                series.label: self.axes.plot([], [], linewidth=1.5, label=series.label, color=colors[series.identity])[
+                    0
+                ]
                 for series in spl_series
             }
             self._di_lines = {
