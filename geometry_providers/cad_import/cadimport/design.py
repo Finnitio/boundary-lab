@@ -23,7 +23,8 @@ WALLS = "walls"
 
 
 class FaceGroupRow(NamedTuple):
-    """A row of the face-group list: ``kind`` is ``"walls"``, ``"interface"`` or ``"group"``."""
+    """A row of the face-group list: ``kind`` is ``"walls"`` (also an own-region body's walls), ``"interface"`` or
+    ``"group"``."""
 
     name: str
     faces: frozenset[int]
@@ -47,6 +48,9 @@ class CadFaceGroups:
     its interface face group, even when a stored group holds them. Faces with a STEP name in no stored group form
     a group of that name. Walls are the faces in no other group. ``interface_names`` renames interfaces by
     detected name.
+
+    ``own_regions`` names air bodies marked "Air, own region": the walls of such a body ``B`` form its own group
+    ``"B walls"``, so each region has its own walls.
     """
 
     def __init__(
@@ -57,8 +61,20 @@ class CadFaceGroups:
         interface_names: Mapping[str, str] | None = None,
         rotation_deg: Sequence[float] = ZERO,
         translation_m: Sequence[float] = ZERO,
+        own_regions: Sequence[str] = (),
     ) -> None:
         self.geometry = geometry
+        self.own_regions = tuple(own_regions)
+        air = {b.name for b in geometry.bodies if b.kind == "air"}
+        own = set(self.own_regions) & air
+        self._mesh_of = {b: r.mesh_id for r in geometry.regions for b in r.bodies}
+        self._air_body = {f.id: next((b for b in f.bodies if b in air), None) for f in geometry.faces}
+        self._region_label = {}  # (mesh id, own-region body or None) -> how a message names the region
+        for region in geometry.regions:
+            rest = [b for b in region.bodies if b not in own]
+            self._region_label[region.mesh_id, None] = ", ".join(rest)
+            self._region_label.update({(region.mesh_id, b): b for b in region.bodies if b in own})
+        self._own_walls = {b: own_walls_name(b) for b in sorted(own)}
         self._names = names = dict(interface_names or {})
         self.interface_names = {i.name: names.get(i.name, i.name).strip() for i in geometry.interfaces}
         self.interface_of = {f: self.interface_names[i.name] for i in geometry.interfaces for f in i.face_ids}
@@ -70,9 +86,10 @@ class CadFaceGroups:
         # Names no interface can take besides walls: stored groups, and STEP names of faces outside interfaces.
         self._taken = {
             *self.found,
+            *self._own_walls.values(),
             *(f.step_name for f in geometry.faces if f.step_name and f.id not in self.interface_of),
         }
-        self._reserved = reserved = {WALLS, *self.interface_names.values()}
+        self._reserved = reserved = {WALLS, *self._own_walls.values(), *self.interface_names.values()}
         groups: dict[str, set[int]] = {}
         member: dict[int, str] = {}
         for name, found in self.found.items():
@@ -91,8 +108,11 @@ class CadFaceGroups:
         for face, name in self.interface_of.items():
             interfaces.setdefault(name, set()).add(face)
         walls = self._ids - member.keys() - self.interface_of.keys()
+        body_walls = {b: {f for f in walls if self._air_body[f] == b} for b in self._own_walls}
+        walls -= {f for faces in body_walls.values() for f in faces}
         self.rows = (
             [FaceGroupRow(WALLS, frozenset(walls), "walls")]
+            + [FaceGroupRow(self._own_walls[b], frozenset(faces), "walls") for b, faces in body_walls.items()]
             + [FaceGroupRow(name, frozenset(faces), "interface") for name, faces in interfaces.items()]
             # A stored group is listed even without faces (all in interfaces, or not found), so it can be deleted.
             + [FaceGroupRow(name, frozenset(faces), "group") for name, faces in groups.items()]
@@ -113,8 +133,9 @@ class CadFaceGroups:
         stored faces not found, unknown face ids and faces in two stored groups."""
         self._check_interface_names(self.interface_names)
         for name in self.found:
-            if not name or name == WALLS:  # interface names: taken, checked above
+            if not name or name == WALLS or name in self._own_walls.values():  # interface names: taken, above
                 raise ValueError(f"Face group name '{name}' is reserved.")
+        self._check_own_regions()
         # A group missing any stored face would silently lose it to walls: the user reviews it.
         if self.needs_review:
             raise ValueError(
@@ -131,6 +152,54 @@ class CadFaceGroups:
                 if member.setdefault(face, name) != name:
                     raise ValueError(f"Face {face} is in face groups '{member[face]}' and '{name}'.")
 
+    def _region(self, face: int) -> tuple[str, str | None] | None:
+        """``(mesh id, own-region body or None)``: the bounded region ``face`` bounds; ``None``: no air body's."""
+        body = self._air_body[face]
+        if body is None:
+            return None
+        return self._mesh_of[body], body if body in self._own_walls else None
+
+    def _check_own_regions(self) -> None:
+        """Reject own regions that are no air bodies, meshes left without a body of the cluster region, and face
+        groups with faces in two regions of one mesh."""
+        air = {b.name for b in self.geometry.bodies if b.kind == "air"}
+        for name in self.own_regions:
+            if name not in air:
+                raise ValueError(f"'{name}' is marked 'Air, own region' but is no air body.")
+        for region in self.geometry.regions:
+            if region.bodies and all(b in self._own_walls for b in region.bodies):
+                bodies = ", ".join(f"'{b}'" for b in region.bodies)
+                raise ValueError(
+                    f"Every air body of mesh '{region.mesh_id}' ({bodies}) is marked 'Air, own region'; "
+                    "keep at least one an Air body."
+                )
+        for row in self.rows:
+            if row.kind == "walls":
+                continue
+            # The cluster region first, then the own regions by name.
+            regions = sorted(
+                {r for f in row.faces if (r := self._region(f)) is not None}, key=lambda r: (r[0], r[1] or "")
+            )
+            for mesh in sorted({m for m, _ in regions}):
+                labels = [self._region_label[r] for r in regions if r[0] == mesh]
+                if len(labels) > 1:
+                    raise ValueError(
+                        f"Face group '{row.name}' has faces in regions '{labels[0]}' and '{labels[1]}'; "
+                        "split it into one face group per region."
+                    )
+
+    def own_region_groups(self, mesh_faces: Mapping[str, Sequence[int]]) -> dict[str, dict[str, list[str]]]:
+        """Mesh id -> {own-region body -> the names of the face groups on its faces, sorted} of ``mesh_faces``."""
+        result = {}
+        for mesh_id, faces in mesh_faces.items():
+            groups = {b: set() for b in self._own_walls if self._mesh_of.get(b) == mesh_id}
+            for face in faces:
+                if (body := self._air_body.get(face)) in groups:
+                    groups[body].add(self._row_of[face].name)
+            if groups:
+                result[mesh_id] = {b: sorted(names) for b, names in groups.items()}
+        return result
+
     # -- edits: each returns the changed design source fields and a note, or raises ValueError ----------------
 
     def moved_to(self, name: str, faces) -> FaceGroupEdit:
@@ -141,7 +210,7 @@ class CadFaceGroups:
             raise ValueError("Select faces and enter a face group name first.")
         if name == WALLS:
             return self.moved_to_walls(faces)
-        if name in self.interface_names.values():
+        if name in self.interface_names.values() or name in self._own_walls.values():
             raise ValueError(f"Face group name '{name}' is reserved.")
         skipped = faces & self.interface_of.keys()
         faces -= skipped
@@ -230,6 +299,12 @@ class CadFaceGroups:
 
 # -- the design source as the editor edits it --------------------------------------------------------------------------
 
+
+def own_walls_name(body: str) -> str:
+    """The face group of the walls of ``body``, an air body marked "Air, own region"."""
+    return f"{body} {WALLS}"
+
+
 FEM_FINENESS = "elements_per_wavelength"  # design source keys of the mesh finenesses
 BEM_FINENESS = "bem_elements_per_wavelength"
 
@@ -269,6 +344,7 @@ class CadDesign:
             geometry,
             {g["name"]: g["faces"] for g in self.source.get("face_groups", [])},
             interface_names=self.source.get("interface_names", {}),
+            own_regions=self.own_regions,
             **self.placement,
         )
         try:
@@ -278,6 +354,31 @@ class CadDesign:
         except ValueError as exc:  # as Generate rejects it
             self.sizes = CadSizes(geometry, [], {}, **self.placement)
             self.size_error = str(exc)
+
+    @property
+    def own_regions(self) -> tuple[str, ...]:
+        """The bodies marked "Air, own region"; none while the stored roles cannot be read (Generate says why)."""
+        try:
+            return own_regions(self.source)
+        except ValueError:
+            return ()
+
+    def role(self, body: str) -> str:
+        """The Kind of air body ``body``: ``"own_region"`` or ``"air"``."""
+        return "own_region" if body in self.own_regions else "air"
+
+    def set_role(self, body: str, role: str) -> dict:
+        """The design source fields with air body ``body`` of Kind ``role`` (a :data:`BODY_ROLES` key, or
+        ``"exterior"`` for a closed shell); closed shells keep their air-or-exterior choice in ``closed_shells``."""
+        roles = {n: r for n, r in self.source.get("body_roles", {}).items() if n != body}
+        changes = {"body_roles": roles | ({body: role} if role == "own_region" else {})}
+        shells = self.source.get("closed_shells", {})
+        shell_names = {s.name for s in self.geometry.closed_shells} if self.geometry is not None else set()
+        if body in shell_names:
+            shell_role = "exterior" if role == "exterior" else "air"
+            if shells.get(body) != shell_role:
+                changes["closed_shells"] = shells | {body: shell_role}
+        return changes
 
     @property
     def rotation_deg(self) -> tuple:
@@ -301,9 +402,7 @@ class CadDesign:
 
     def sizing(self, fmax_hz: float | None, sound_speed_m_per_s: float) -> CadSizing:
         """The design's sizing at the project's maximum frequency (``None`` while unknown) and sound speed."""
-        return CadSizing(
-            fmax_hz, sound_speed_m_per_s, float(self.source[FEM_FINENESS]), self.source.get(BEM_FINENESS)
-        )
+        return CadSizing(fmax_hz, sound_speed_m_per_s, float(self.source[FEM_FINENESS]), self.source.get(BEM_FINENESS))
 
     def targets(self, sizing: CadSizing, faces=(), volumes=()) -> list[CadSizeOverride]:
         """The mesh fineness of the target element size of each of ``faces`` then each air-body ``volumes``: what the
@@ -321,8 +420,17 @@ class CadDesign:
 
     def dropped(self) -> tuple[dict, str]:
         """The size fields without sizes of faces the geometry no longer has and of bodies that are no air bodies,
-        and a note saying so; ``({}, "")`` when there is none (or the stored sizes cannot be read)."""
-        return ({}, "") if self.size_error or self.sizes is None else self.sizes.dropped()
+        the body roles without bodies that are no air bodies, and a note saying so; ``({}, "")`` when there is
+        none (stored sizes that cannot be read are kept)."""
+        changes, note = ({}, "") if self.size_error or self.sizes is None else self.sizes.dropped()
+        roles = self.source.get("body_roles", {})
+        if self.geometry is None or not isinstance(roles, Mapping):
+            return changes, note
+        air = {b.name for b in self.geometry.bodies if b.kind == "air"}
+        if gone := sorted(n for n in roles if n not in air):
+            changes = changes | {"body_roles": {n: r for n, r in roles.items() if n in air}}
+            note = " ".join(filter(None, [note, f"Kind 'Air, own region' of {', '.join(gone)} dropped: no air body."]))
+        return changes, note
 
     def migrated(self, sizing: CadSizing) -> dict | None:
         """The whole source with older body and face-group sizes turned into face and volume sizes (see
@@ -363,9 +471,24 @@ def design_settings(source: Mapping, configuration: Mapping) -> CadImportSetting
             rotation_deg=tuple(source["rotation_deg"]),
             translation_m=_mm_to_m(source["translation_mm"]),
             interface_names=dict(source.get("interface_names", {})),
+            own_regions=own_regions(source),
         )
     except (KeyError, TypeError) as exc:
         raise ValueError(f"Invalid CAD import source: {exc}") from exc
+
+
+BODY_ROLES = {"air": "Air body", "own_region": "Air, own region"}  # role in the design source -> Kind label
+
+
+def own_regions(source: Mapping) -> tuple[str, ...]:
+    """The air bodies design ``source`` marks "Air, own region" (``body_roles``), sorted by name."""
+    roles = source.get("body_roles", {})
+    if not isinstance(roles, Mapping):
+        raise ValueError("Body roles must map body names to roles.")
+    for name, role in roles.items():
+        if role not in BODY_ROLES:
+            raise ValueError(f"Air body '{name}' must be 'air' or 'own_region', not '{role}'.")
+    return tuple(sorted(name for name, role in roles.items() if role == "own_region"))
 
 
 def _face_groups(source: Mapping) -> dict:

@@ -30,7 +30,16 @@ from blab.project.model import (
 )
 from blab.system_solve import prepare_system_solve
 from cad_fixtures import bored_ball, multipart_port, single_solid, strip_names, vented_box, waveguide
-from cad_plugin import CadGeometry, CadImportResult, CadInterface, CadMesh, face_ref, inspect_step, module
+from cad_plugin import (
+    CadGeometry,
+    CadImportResult,
+    CadInterface,
+    CadMesh,
+    CadOwnRegion,
+    face_ref,
+    inspect_step,
+    module,
+)
 
 ZERO = module("pipeline").ZERO
 
@@ -765,3 +774,191 @@ def with_source(system, mesh_id, group):
         components=(PhysicalComponent("source", "Source", "ideal_velocity_source", (boundary.id,)),),
         excitation_ports=(ExcitationPort("port", "Port", "source", "normal_velocity"),),
     )
+
+
+def own_port(groups=("Driver", "walls"), port_groups=("Interface 1 Port", "Port walls")):
+    """``meshed`` with the port an air body of its own region: its walls and interface are its face groups."""
+    result = meshed(groups=(*groups, *port_groups))
+    chamber, exterior = result.meshes
+    chamber = replace(chamber, own_regions=(CadOwnRegion("Port", port_groups),))
+    return replace(result, meshes=(chamber, exterior))
+
+
+def test_an_own_region_body_is_its_own_region_on_the_cluster_mesh_with_its_face_groups(plugin):
+    patch = patch_of(plugin, own_port())
+
+    regions = {r["id"]: r for r in patch["regions"]["upsert"]}
+    assert [(g["mesh_id"], g["name"]) for g in regions["doc/chamber"]["volume_groups"]] == [
+        ("doc/mesh/chamber", "Chamber")
+    ]
+    port = regions["doc/chamber/Port"]
+    assert (port["name"], port["kind"], port["mesh_ids"]) == ("Box Port", "bounded_air", ["doc/mesh/chamber"])
+    assert [(g["mesh_id"], g["name"]) for g in port["volume_groups"]] == [("doc/mesh/chamber", "Port")]
+    assert regions["doc/chamber"]["name"] == "Box Chamber"
+    assert not any("loss_model" in r for r in regions.values())
+    assert {b["id"]: (b["region_id"], b["kind"]) for b in patch["surface_assignments"]["upsert"]} == {
+        "doc/chamber/Driver": ("doc/chamber", "rigid"),
+        "doc/chamber/walls": ("doc/chamber", "rigid"),
+        "doc/chamber/Interface 1 Port": ("doc/chamber/Port", "interface"),
+        "doc/chamber/Port walls": ("doc/chamber/Port", "rigid"),
+        "doc/exterior/Interface 1 Port": ("doc/exterior", "interface"),
+        "doc/exterior/walls": ("doc/exterior", "rigid"),
+    }
+    (interface,) = patch["interfaces"]["upsert"]
+    assert interface["bounded_boundary_id"] == "doc/chamber/Interface 1 Port"
+
+
+def system_of(patch, system=None):
+    """``system`` (a dict) after ``patch``'s regions, boundaries and interfaces, merged as the host does."""
+    system = deepcopy(system or {})
+    for section, key in (("regions", "regions"), ("surface_assignments", "boundaries"), ("interfaces", "interfaces")):
+        entities = {e["id"]: e for e in system.get(key, [])}
+        for item_id in patch[section].get("remove", []):
+            del entities[item_id]
+        for item in patch[section]["upsert"]:
+            entities[item["id"]] = entities.get(item["id"], {}) | item
+        system[key] = list(entities.values())
+    return system
+
+
+def test_switching_a_body_to_its_own_region_moves_its_existing_boundaries_and_keeps_the_rest(plugin):
+    system = system_of(patch_of(plugin, meshed(groups=("Driver", "Interface 1 Port", "walls"))))
+
+    patch = patch_of(plugin, own_port(), system)
+
+    assert {b["id"]: b for b in patch["surface_assignments"]["upsert"]} == {
+        "doc/chamber/Interface 1 Port": {"id": "doc/chamber/Interface 1 Port", "region_id": "doc/chamber/Port"},
+        "doc/chamber/Port walls": {
+            "id": "doc/chamber/Port walls",
+            "name": "Box chamber Port walls",
+            "region_id": "doc/chamber/Port",
+            "group": {"mesh_id": "doc/mesh/chamber", "dimension": 2, "name": "Port walls"},
+            "kind": "rigid",
+        },
+    }
+
+
+def test_switching_the_own_region_off_removes_the_region_and_its_walls_and_keeps_the_material_meanwhile(plugin):
+    system = system_of(patch_of(plugin, own_port()))
+    port = next(r for r in system["regions"] if r["id"] == "doc/chamber/Port")
+    port["loss_model"] = {"model": "jca", "preset": "Melamine foam"}
+
+    regenerated = system_of(patch_of(plugin, own_port(), system), system)
+    assert next(r for r in regenerated["regions"] if r["id"] == "doc/chamber/Port")["loss_model"] == port["loss_model"]
+
+    patch = patch_of(plugin, meshed(groups=("Driver", "Interface 1 Port", "walls")), regenerated)
+
+    assert patch["regions"]["remove"] == ["doc/chamber/Port"]
+    assert patch["surface_assignments"]["remove"] == ["doc/chamber/Port walls"]
+    assert patch["surface_assignments"]["upsert"] == [
+        {"id": "doc/chamber/Interface 1 Port", "region_id": "doc/chamber"}
+    ]
+    chamber = next(r for r in patch["regions"]["upsert"] if r["id"] == "doc/chamber")
+    assert [g["name"] for g in chamber["volume_groups"]] == ["Chamber", "Port"]
+
+
+def group_centres(response, mesh_id="chamber"):
+    """``{face group: triangle centroids (mm)}`` of the written mesh ``mesh_id``, and the centroids in no group."""
+    mesh = meshio.read(next(m.mesh_path for m in response.geometry.meshes if m.id == mesh_id))
+    triangles = mesh.cells_dict["triangle"]
+    tags = mesh.cell_data_dict["gmsh:physical"]["triangle"]
+    centres = mesh.points[triangles].mean(axis=1) * 1000
+    return {name: centres[tags == tag] for name, (tag, dim) in mesh.field_data.items() if dim == 2}
+
+
+def test_an_own_region_body_writes_its_walls_apart_and_its_contact_faces_in_no_group(plugin, box_step, tmp_path):
+    catalog, backend = plugin
+    project = make_project(catalog, box_step, body_roles={"Port": "own_region"})
+
+    project, response = generate(backend, project, tmp_path)
+
+    groups = group_centres(response)
+    assert sorted(groups) == ["Driver", "Interface 1 Port", "Port walls", "walls"]
+    port_walls = groups["Port walls"]
+    assert np.allclose(np.hypot(port_walls[:, 0], port_walls[:, 1]), 10, atol=1)  # the port's lateral face
+    assert ((port_walls[:, 2] > -20) & (port_walls[:, 2] < 0)).all()
+    assert (groups["walls"][:, 2] <= -20 + 1e-6).all()  # the chamber's walls only
+    # The port's floor, shared with the chamber, is a region seam: no group holds a triangle on it.
+    on_seam = [np.isclose(c[:, 2], -20) & (np.hypot(c[:, 0], c[:, 1]) < 9.5) for c in groups.values()]
+    assert not any(seam.any() for seam in on_seam)
+    system = project.physical_system
+    doc = project.generator_documents[0].id
+    regions = {r.id: r for r in system.regions}
+    assert [g.name for g in regions[f"{doc}/chamber"].volume_groups] == ["Chamber"]
+    port = regions[f"{doc}/chamber/Port"]
+    assert (port.name, [g.name for g in port.volume_groups]) == ("Speaker Port", ["Port"])
+    assert port.mesh_ids == regions[f"{doc}/chamber"].mesh_ids
+    assert {b.group.name: b.region_id for b in system.boundaries if b.group.mesh_id.endswith("/chamber")} == {
+        "Driver": f"{doc}/chamber",
+        "walls": f"{doc}/chamber",
+        "Port walls": f"{doc}/chamber/Port",
+        "Interface 1 Port": f"{doc}/chamber/Port",
+    }
+
+
+def chamber_front_and_port_side(face):
+    """The chamber's front around the port, and the port's lateral face: one face of each region."""
+    return face.bodies in (("Chamber",), ("Port",)) and abs(face.centre[2] + 0.02) < 0.021 and face.area > 0
+
+
+@pytest.mark.parametrize(
+    "changes,match",
+    [
+        (
+            {"face_groups": "spanning"},
+            "Face group 'Lining' has faces in regions 'Chamber' and 'Port'; split it into one face group per region",
+        ),
+        ({"body_roles": {"Port": "own_region", "Chamber": "own_region"}}, "keep at least one an Air body"),
+        ({"body_roles": {"Cabinet": "own_region"}}, "'Cabinet' is marked 'Air, own region' but is no air body"),
+        ({"body_roles": {"Port": "porous"}}, "Air body 'Port' must be 'air' or 'own_region'"),
+    ],
+)
+def test_generate_rejects_what_an_own_region_cannot_take(plugin, box_step, tmp_path, changes, match):
+    catalog, backend = plugin
+    if changes.get("face_groups") == "spanning":
+        group = stored_group("Lining", box_step, chamber_front_and_port_side)
+        assert {f.bodies for f in inspect_step(box_step).faces if chamber_front_and_port_side(f)} == {
+            ("Chamber",),
+            ("Port",),
+        }
+        changes = {"face_groups": [group]}
+    project = make_project(catalog, box_step, **({"body_roles": {"Port": "own_region"}} | changes))
+    session = backend.create_session(make_request(project, tmp_path))
+    with pytest.raises(ValueError, match=match):
+        session.generate()
+
+
+def test_regenerating_keeps_the_own_regions_material_and_switching_it_off_retires_region_and_walls(
+    plugin, box_step, tmp_path
+):
+    catalog, backend = plugin
+    project, _ = generate(backend, make_project(catalog, box_step, body_roles={"Port": "own_region"}), tmp_path)
+    document = project.generator_documents[0]
+    port_id = f"{document.id}/chamber/Port"
+    system = project.physical_system
+    project.physical_system = replace(
+        system,
+        regions=tuple(
+            replace(r, loss_model={"bulk_loss_factor": 0.2}) if r.id == port_id else r for r in system.regions
+        ),
+    )
+
+    project, _ = generate(backend, project, tmp_path)
+    assert next(r for r in project.physical_system.regions if r.id == port_id).loss_model == {"bulk_loss_factor": 0.2}
+
+    project.generator_documents = (replace(document, source=document.source | {"body_roles": {"Port": "air"}}),)
+    project, _ = generate(backend, project, tmp_path)
+
+    system = project.physical_system
+    (chamber,) = (r for r in system.regions if r.kind == "bounded_air")
+    assert (chamber.id, sorted(g.name for g in chamber.volume_groups)) == (
+        f"{document.id}/chamber",
+        ["Chamber", "Port"],
+    )
+    assert {b.group.name for b in system.boundaries if b.group.mesh_id.endswith("/chamber")} == {
+        "Driver",
+        "walls",
+        "Interface 1 Port",
+    }
+    assert {b.region_id for b in system.boundaries if b.group.mesh_id.endswith("/chamber")} == {chamber.id}
+    assert len(PhysicalSystemCompiler().compile(system).interfaces) == 1

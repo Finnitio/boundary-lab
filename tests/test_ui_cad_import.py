@@ -119,12 +119,13 @@ def test_loaded_step_lists_bodies_and_faces_with_size_and_symmetry(cad_editor):
     assert children(bodies["Cabinet"]) == ["Faces"]  # an exterior surface body has no volume
     assert "Driver" in children(faces_row(bodies["Chamber"]))  # STEP face name
     assert all(name.startswith("Face ") for name in children(faces_row(bodies["Cabinet"])))
-    assert {name: item.text(2) for name, item in bodies.items()} == {
+    kinds = {name: editor.kind_combos[name].currentText() for name in editor.kind_combos}
+    assert kinds | {name: item.text(2) for name, item in bodies.items() if item.text(2)} == {
         "Chamber": "Air body",
         "Port": "Air body",
         "Cabinet": "Exterior surface",
     }
-    assert not editor.kind_combos  # a dropdown only on closed shells
+    assert list(editor.kind_combos) == ["Chamber", "Port"]  # a dropdown on air bodies and closed shells
     assert "120.0 x 120.0 x 210.0 mm" in editor.info.text()
     assert "Symmetry Off" in editor.info.text()
     assert editor.visible_faces() == {face["id"] for face in editor.geometry["faces"]}
@@ -280,9 +281,9 @@ def test_closed_shell_gets_its_guessed_kind_unasked_and_the_kind_dropdown_change
 
     assert host.snapshot().source["closed_shells"] == {}  # a guess is no choice
     assert list(body_items(editor)) == ["Closed shell 1", "Exterior surface 1"]
-    assert list(editor.kind_combos) == ["Closed shell 1"]  # only closed shells have a kind
+    assert list(editor.kind_combos) == ["Closed shell 1"]  # an exterior surface body has no kind to choose
     combo = editor.kind_combos["Closed shell 1"]
-    assert [combo.itemText(i) for i in range(combo.count())] == ["Air body", "Exterior surface"]
+    assert [combo.itemText(i) for i in range(combo.count())] == ["Air body", "Air, own region", "Exterior surface"]
     assert combo.currentData() == "air"
 
     combo.setCurrentIndex(combo.findData("exterior"))
@@ -1235,7 +1236,8 @@ def test_faces_grouped_before_they_became_interface_faces_stay_in_the_interface_
     assert f"stays in interface '{interface['name']}'" in editor.status.text()
     assert [g["name"] for g in host.snapshot().source["face_groups"]] == ["Interface"]  # stored as picked
 
-    editor.kind_combos["Closed shell 1"].setCurrentIndex(1)  # exterior again: no interface
+    combo = editor.kind_combos["Closed shell 1"]
+    combo.setCurrentIndex(combo.findData("exterior"))  # exterior again: no interface
     wait(qapp, lambda: not editor.loading)
     assert group_rows(editor)["Interface"] == 1
 

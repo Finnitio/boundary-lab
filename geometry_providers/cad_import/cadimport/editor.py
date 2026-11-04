@@ -51,13 +51,12 @@ from . import (
     FEM_LEVELS,
     LEVELS,
     MIXED,
-    WALLS,
     CadDesign,
     CadFaceGroups,
     CadSizeOverride,
     place_preview,
 )
-from .design import BEM_FINENESS, FEM_FINENESS, source_placement
+from .design import BEM_FINENESS, BODY_ROLES, FEM_FINENESS, source_placement
 from .jobs import preview_in_worker
 from .sizing import shared
 
@@ -768,7 +767,7 @@ class CadImportEditor:
         return answer == QMessageBox.StandardButton.Yes
 
     def _set_role(self, name, role):
-        self.edited({"closed_shells": self.source.get("closed_shells", {}) | {name: role}})
+        self.edited(self._design.set_role(name, role))
 
     def _show_preview(self, preview, *, reset_camera=False):
         self._preview = preview
@@ -810,10 +809,11 @@ class CadImportEditor:
                 item.setToolTip(0, "Air body" if air else "Exterior surface body")
                 self.tree.addTopLevelItem(item)
                 self._body_items[name] = item
-                if name in roles:
-                    self._add_kind_combo(item, name, roles[name])
+                if name in roles or air:
+                    role = self._design.role(name) if roles.get(name, "air") == "air" else roles[name]
+                    self._add_kind_combo(item, name, role, closed_shell=name in roles)
                 else:
-                    item.setText(2, "Air body" if air else "Exterior surface")
+                    item.setText(2, "Exterior surface")
                 rows = [(item, body_faces, volumes)]
                 if air:
                     volume = QTreeWidgetItem(["Volume"])
@@ -866,14 +866,19 @@ class CadImportEditor:
             if any(notes):
                 self.status.setText(" ".join(note for note in notes if note))
 
-    def _add_kind_combo(self, item, name, role):
-        """The Kind dropdown of closed shell ``name``'s body row; a change re-reads the file."""
+    def _add_kind_combo(self, item, name, role, *, closed_shell):
+        """The Kind dropdown of air body or closed shell ``name``'s body row; a closed shell's change between air
+        and exterior re-reads the file."""
         combo = QComboBox()
-        combo.addItem("Air body", "air")
-        combo.addItem("Exterior surface", "exterior")
+        for role_name, label in BODY_ROLES.items():
+            combo.addItem(label, role_name)
+        tips = ["Air, own region: meshed with the air it touches, but a region of its own in System."]
+        if closed_shell:
+            combo.addItem("Exterior surface", "exterior")
+            tips.insert(0, "A closed shell of surfaces: guessed until you choose.")
         combo.setCurrentIndex(combo.findData(role))
         combo.setAccessibleName(f"Kind of {name}")
-        combo.setToolTip("A closed shell of surfaces: guessed until you choose.")
+        combo.setToolTip("\n".join(tips))
         combo.currentIndexChanged.connect(lambda _: self._set_role(name, combo.currentData()))
         self.tree.setItemWidget(item, 2, combo)
         self.kind_combos[name] = combo
@@ -993,7 +998,7 @@ class CadImportEditor:
                 if kind == "group" and held != {name}:
                     menu.addAction(f'Move to "{name}"', lambda n=name: self.add_to_group(n, face_ids))
             menu.addAction("New group…", lambda: self._add_to_new_group(face_ids))
-            if held != {WALLS}:
+            if held - {name for name, _, kind in rows if kind == "walls"}:
                 menu.addAction("Move to walls", lambda: self.remove_from_group(face_ids))
         self._add_size_menu(menu, partial(self.set_face_size, face_ids))
         return menu
@@ -1119,7 +1124,8 @@ class CadImportEditor:
 
     def group_colours(self):
         """``{row name: colour}``: walls the plain face colour, the others each their own, stable by name."""
-        colours, free = {WALLS: FACE_COLOUR}, list(GROUP_COLOURS)
+        colours = {name: FACE_COLOUR for name, _, kind in self.rows() if kind == "walls"}  # also own regions' walls
+        free = list(GROUP_COLOURS)
         for name in sorted(name for name, _, kind in self.rows() if kind != "walls"):
             start = zlib.crc32(name.encode()) % len(GROUP_COLOURS)
             colour = next((c for c in GROUP_COLOURS[start:] + GROUP_COLOURS[:start] if c in free), None)

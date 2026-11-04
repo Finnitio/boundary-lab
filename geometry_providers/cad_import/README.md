@@ -28,6 +28,14 @@ in **Edit > Generator Plugins...** and add a design.
    Exterior surface), which re-reads the file; another STEP file starts from
    the guesses again. The CLI takes `--closed-shell "Closed shell 1=air"`
    (unset shells get the guess).
+   An air body's **Kind** can also be **Air, own region** (for example a
+   damping fill imported as its own air body). It stays in the same mesh as
+   the air it touches, but Generate reports it as a region of its own,
+   "<mesh> <Body>", whose material you set in **System › Regions**; it survives
+   regenerating. The faces it shares with the other air bodies are region seams
+   (in no face group), its free walls form the face group "<Body> walls", and a
+   face group with faces in two regions is rejected. Setting it back to Air body
+   removes the region and its boundaries on the next Generate.
 2. Under **Placement**, rotate by any angle about the Boundary Lab X, Y and Z
    axes (in that order, about the origin), then translate in mm. The view, size,
    suggested symmetry and the detected interfaces follow at once, without
