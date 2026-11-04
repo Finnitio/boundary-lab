@@ -38,7 +38,7 @@ from blab.solve_results import (
     fem_volume_result_domain,
 )
 from blab.solve_results.model import INTERFACE_RADIATION_ID, RADIATION_SOURCE_DOMAIN_ID
-from blab.solvers.beat_engine_runtime import DEFAULT_BEAT_ENGINE_CUDA_PROJECT
+from blab.solvers.beat_engine_runtime import BEAT_ENGINE_BACKENDS, DEFAULT_BEAT_ENGINE_CUDA_PROJECT
 from blab.solvers.coupled_backend import PhysicalSystemProductionBackend, validate_solve_plan
 from blab.solvers.engine_distribution import backend_catalog
 from blab.solvers.registry import normalize_backend_id, packaged_backend_available
@@ -357,7 +357,9 @@ def prepare_headless_solve(
         outputs=tuple(outputs),
         solver_options=options,
     )
-    validate_solve_plan(request)
+    # A local BEAT backend is known before submission; a remote server selects its own.
+    engine_backend = backend_id.removeprefix("beat_")
+    validate_solve_plan(request, bem_backend=engine_backend if engine_backend in BEAT_ENGINE_BACKENDS else None)
     return replace(prepared, request=request, result_domains=tuple(domains))
 
 
@@ -385,6 +387,7 @@ def validation_summary(
         "output_ids": [output.id for output in request.outputs],
         "meshes": mesh_entries,
         "region_materials": _region_material_entries(request.compiled_system),
+        "warnings": [warning.as_dict() for warning in request.compiled_system.warnings],
         "assumptions": [
             {"status": item.status.value, "statement": item.statement} for item in request.compiled_system.assumptions
         ],

@@ -7,6 +7,7 @@ from blab.acoustic_materials import (
     miki_wall_impedance_parameters,
     region_bulk_loss_factor,
     region_material,
+    region_material_warnings,
     wall_impedance_parameters,
 )
 
@@ -130,7 +131,7 @@ def test_region_material_normalizes_a_rigid_jca_material() -> None:
         ({"thermal_characteristic_length_m": float("nan")}, r"thermal characteristic length .* > 0\."),
         ({"tortuosity": "1.02"}, r"tortuosity \(tortuosity\) must be a finite number"),
         ({"porosity": None}, r"porosity \(porosity\) must be a finite number"),
-        ({"frame": "limp"}, r"unsupported JCA frame 'limp'; expected one of: rigid\."),
+        ({"frame": "elastic"}, r"unsupported JCA frame 'elastic'; expected one of: limp, rigid\."),
         ({"frame": None}, r"unsupported JCA frame None"),
         ({"bulk_loss_factor": 0.0}, r"FEM bulk loss factor is only available for Air, not JCA\."),
         ({"static_thermal_permeability_m2": 1e-9}, r"unsupported JCA parameters: static_thermal_permeability_m2\."),
@@ -152,3 +153,77 @@ def test_region_material_reports_missing_jca_parameters_and_unbounded_regions() 
         "Region 'region:far' JCA material is missing viscous characteristic length (viscous_characteristic_length_m).",
         "Region 'region:far' JCA material is missing thermal characteristic length (thermal_characteristic_length_m).",
     )
+
+
+def test_region_material_normalizes_jcal_with_its_static_thermal_permeability() -> None:
+    jcal = {**SOFT_FIBROUS_JCA, "model": "jcal", "static_thermal_permeability_m2": 2e-9}
+
+    material = region_material(jcal, region_id="region:fill", bounded=True)
+
+    assert material.is_porous
+    assert (material.model, material.frame) == ("jcal", "rigid")
+    assert material.to_loss_model() == jcal
+
+
+def test_region_material_normalizes_a_limp_frame_with_its_frame_density() -> None:
+    limp = {**SOFT_FIBROUS_JCA, "frame": "limp", "frame_density_kg_per_m3": 30}
+
+    material = region_material(limp, region_id="region:fill", bounded=True)
+
+    assert (material.model, material.frame) == ("jca", "limp")
+    assert material.to_loss_model() == limp
+    assert isinstance(material.to_loss_model()["frame_density_kg_per_m3"], float)
+
+
+JCAL_LIMP = {
+    **SOFT_FIBROUS_JCA,
+    "model": "jcal",
+    "frame": "limp",
+    "static_thermal_permeability_m2": 2e-9,
+    "frame_density_kg_per_m3": 30.0,
+}
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    (
+        ({"static_thermal_permeability_m2": 0.0}, r"JCAL static thermal permeability .* must be a finite number > 0\."),
+        ({"static_thermal_permeability_m2": -1e-9}, r"JCAL static thermal permeability .* > 0\."),
+        ({"frame_density_kg_per_m3": 0.0}, r"JCAL frame density .* must be a finite number > 0\."),
+        ({"frame_density_kg_per_m3": float("inf")}, r"JCAL frame density .* > 0\."),
+        ({"frame": "elastic"}, r"unsupported JCAL frame 'elastic'; expected one of: limp, rigid\."),
+    ),
+)
+def test_region_material_rejects_invalid_jcal_and_limp_parameters(change, message) -> None:
+    with pytest.raises(MaterialError, match=f"^Region 'region:fill' .*{message}"):
+        region_material({**JCAL_LIMP, **change}, region_id="region:fill", bounded=True)
+
+
+def test_region_material_requires_and_scopes_jcal_and_limp_parameters() -> None:
+    with pytest.raises(MaterialError) as missing:
+        region_material({**SOFT_FIBROUS_JCA, "model": "jcal", "frame": "limp"}, region_id="region:fill", bounded=True)
+    with pytest.raises(MaterialError) as rigid:
+        region_material({**SOFT_FIBROUS_JCA, "frame_density_kg_per_m3": 30.0}, region_id="region:fill", bounded=True)
+
+    assert missing.value.issues == (
+        "Region 'region:fill' JCAL material is missing static thermal permeability (static_thermal_permeability_m2).",
+        "Region 'region:fill' JCAL material is missing frame density (frame_density_kg_per_m3).",
+    )
+    assert rigid.value.issues == ("Region 'region:fill' uses unsupported JCA parameters: frame_density_kg_per_m3.",)
+
+
+def test_material_warns_but_does_not_reject_a_thermal_length_below_the_viscous_length() -> None:
+    inverted = {**SOFT_FIBROUS_JCA, "thermal_characteristic_length_m": 60e-6}
+
+    material = region_material(inverted, region_id="region:fill", bounded=True)
+
+    assert [warning.as_dict() for warning in region_material_warnings(material, region_id="region:fill")] == [
+        {
+            "code": "porous_thermal_length_below_viscous_length",
+            "region_id": "region:fill",
+            "message": "Region 'region:fill' JCA thermal characteristic length (60 um) is smaller than its viscous "
+            "characteristic length (90 um); measured data usually has thermal >= viscous. Check the values.",
+        }
+    ]
+    for regular in (SOFT_FIBROUS_JCA, {**SOFT_FIBROUS_JCA, "thermal_characteristic_length_m": 90e-6}, {}):
+        assert region_material_warnings(region_material(regular, region_id="r", bounded=True), region_id="r") == ()
