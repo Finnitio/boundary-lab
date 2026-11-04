@@ -111,6 +111,10 @@ automatic selection. `beat_cpu` uses the ordinary CPU path for exterior-only
 projects, sparse UMFPACK pressure FEM for interior-only projects, and exact FEM
 interface condensation for coupled production projects.
 The former `beat_cpu_condensed` ID remains a compatibility alias for `beat_cpu`.
+Coupled projects with porous regions solve on `beat_cpu` and `beat_cuda` only;
+`blab project validate` and `solve` reject them on `beat_rocm` and `beat_metal`
+before a worker starts, naming the backend. Interior-only porous projects
+always solve on CPU and are accepted with any backend.
 `--julia-executable` and `--julia-threads` select the Julia installation and
 thread count. The output directory must not already exist, which prevents an
 agent from accidentally overwriting a previous run.

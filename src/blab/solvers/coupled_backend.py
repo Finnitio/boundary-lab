@@ -54,6 +54,12 @@ from blab.system_contract import (
 DEFAULT_COUPLED_SOLVER_SCRIPT = DEFAULT_BEAT_ENGINE_SYSTEM_SOLVER_SCRIPT
 DEFAULT_COUPLED_CPU_PROJECT = DEFAULT_BEAT_ENGINE_CPU_PROJECT
 COUPLED_BEM_BACKENDS = BEAT_ENGINE_BACKENDS
+# Backends whose coupled FEM-BEM paths form per-region material operators (porous regions).
+# Mirrors BEAT Engine ``BeatEngineCore.PER_REGION_MATERIAL_BACKENDS``, which the worker only
+# announces per backend (``fem_region_material_models``) in its ready event, i.e. after a Julia
+# worker for that backend has started. Checking here rejects the request before any worker
+# starts; the engine's ``negotiate_submission`` and driver still refuse it as well.
+PER_REGION_MATERIAL_BACKENDS = ("cpu", "cuda")
 COUPLED_BOUNDARY_KINDS = {
     BoundaryKind.RIGID,
     BoundaryKind.MOVING,
@@ -568,8 +574,12 @@ def validate_system_capabilities(request: SystemSolveRequest) -> None:
     validate_exterior_capabilities(request)
 
 
-def validate_solve_plan(request: SystemSolveRequest) -> None:
-    """Validate both the protocol contract and supported solver capabilities."""
+def validate_solve_plan(request: SystemSolveRequest, *, bem_backend: str | None = None) -> None:
+    """Validate both the protocol contract and supported solver capabilities.
+
+    ``bem_backend`` (default: ``solver_options["bem_backend"]``, when set) also checks the
+    request against that BEAT backend's capabilities.
+    """
 
     validate_system_solve_request(request)
     for output in request.outputs:
@@ -580,6 +590,29 @@ def validate_solve_plan(request: SystemSolveRequest) -> None:
             if points.ndim != 2 or points.shape[1:] != (3,) or not len(points) or not np.isfinite(points).all():
                 raise ValueError("Interface radiation requires finite observation points with shape (point, 3).")
     validate_system_capabilities(request)
+    backend = bem_backend if bem_backend is not None else request.solver_options.get("bem_backend")
+    if backend is not None:
+        validate_backend_capabilities(request, normalize_beat_engine_backend(backend))
+
+
+def validate_backend_capabilities(request: SystemSolveRequest, bem_backend: str) -> None:
+    """Reject features the selected BEAT backend cannot solve (``bem_backend`` is an engine name)."""
+
+    regions = request.compiled_system.regions
+    if not any(region.kind == AcousticRegionKind.UNBOUNDED_AIR for region in regions):
+        return  # Interior FEM always solves on CPU; exterior BEM has no region materials.
+    porous_region_ids = [
+        region.id
+        for region in regions
+        if region.kind == AcousticRegionKind.BOUNDED_AIR
+        and region_material(region.loss_model, region_id=region.id, bounded=True).is_porous
+    ]
+    if porous_region_ids and bem_backend not in PER_REGION_MATERIAL_BACKENDS:
+        raise ValueError(
+            f"Porous region materials are not supported on the {bem_backend} backend in coupled FEM-BEM solves "
+            f"(regions {', '.join(repr(region_id) for region_id in porous_region_ids)}); use the "
+            f"{' or '.join(PER_REGION_MATERIAL_BACKENDS)} backend."
+        )
 
 
 def validate_interior_capabilities(request: SystemSolveRequest) -> None:
