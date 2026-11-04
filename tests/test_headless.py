@@ -460,6 +460,25 @@ def test_validate_json_reports_material_warnings_per_region(tmp_path: Path, caps
     ]
 
 
+def test_run_manifest_records_the_validation_warnings_the_run_was_made_despite(tmp_path: Path) -> None:
+    payload = json.loads(FILLED_TUBE.read_text(encoding="utf-8"))
+    payload["physical_system"]["regions"][0]["loss_model"]["thermal_characteristic_length_m"] = 60e-6
+    shutil.copy(FILLED_TUBE.with_suffix("").with_suffix(".msh"), tmp_path)
+    path = tmp_path / FILLED_TUBE.name
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    project = headless_module.load_headless_project(path)
+    prepared = prepare_headless_solve(project, load_headless_solve_spec(None), backend_id="beat_cpu")
+
+    HeadlessResultWriter(
+        tmp_path / "run", project=project, prepared=prepared, backend_id="beat_cpu", public_request={}
+    ).finish(status="complete")
+    manifest = json.loads((tmp_path / "run" / "manifest.json").read_text(encoding="utf-8"))
+
+    (warning,) = manifest["warnings"]
+    assert (warning["code"], warning["region_id"]) == ("porous_thermal_length_below_viscous_length", "region:fill")
+    assert "thermal characteristic length (60 um)" in warning["message"]
+
+
 def test_validate_json_lists_no_warnings_for_a_regular_material(capsys) -> None:
     capsys.readouterr()
     project_main(["validate", str(FILLED_TUBE), "--backend", "beat_cpu", "--json"], prog="blab project")

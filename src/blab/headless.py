@@ -388,7 +388,7 @@ def validation_summary(
         "output_ids": [output.id for output in request.outputs],
         "meshes": mesh_entries,
         "region_materials": _region_material_entries(request.compiled_system),
-        "warnings": [warning.as_dict() for warning in request.compiled_system.warnings],
+        "warnings": _warning_entries(request.compiled_system),
         "region_seams": _region_seam_entries(request.compiled_system),
         "assumptions": [
             {"status": item.status.value, "statement": item.statement} for item in request.compiled_system.assumptions
@@ -452,6 +452,7 @@ class HeadlessResultWriter:
             "meshes": _mesh_manifest_entries(prepared.request.compiled_system),
             "region_materials": _region_material_entries(prepared.request.compiled_system),
             "region_seams": _region_seam_entries(prepared.request.compiled_system),
+            "warnings": _warning_entries(prepared.request.compiled_system),
             "completion_mask": self.completion.tolist(),
             "results": self.results,
         }
@@ -839,6 +840,12 @@ def _mesh_manifest_entries(system) -> list[dict[str, Any]]:
             }
         )
     return entries
+
+
+def _warning_entries(system) -> list[dict[str, Any]]:
+    """Non-blocking validation findings (coarse porous mesh, suspicious material) a run was made despite."""
+
+    return [warning.as_dict() for warning in system.warnings]
 
 
 def _region_seam_entries(system) -> list[dict[str, Any]]:

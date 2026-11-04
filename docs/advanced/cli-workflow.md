@@ -99,7 +99,8 @@ Warning codes:
   thermal characteristic length Λ′ is smaller than its viscous length Λ. This is
   unusual for measured data.
 
-Run manifests record `region_materials` and `region_seams` in the same form.
+Run manifests record `region_materials`, `region_seams` and `warnings` in the
+same form, so a run made despite a warning keeps that finding.
 The material contract is described in
 [Physical System Model](../Physical%20System%20Model.md#materials).
 `examples/filled_tube` (an interior tube filled with JCA),
@@ -321,7 +322,9 @@ speaker-check/
 ```
 
 `manifest.json` records the backend, solver options, phasor convention,
-frequency axis, excitation ids, completion mask, and run status. Each frequency
+frequency axis, excitation ids, completion mask, and run status, plus the
+compiled meshes and the validation `region_materials`, `region_seams` and
+`warnings` described above. Each frequency
 is committed independently, so a failed or interrupted run retains completed
 complex quantities and diagnostics. The frequency JSON maps semantic quantity
 ids to arrays in the corresponding NPZ file. The result phasor convention is
