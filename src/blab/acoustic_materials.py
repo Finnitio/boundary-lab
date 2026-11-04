@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import cmath
 import json
 import math
 from dataclasses import dataclass
@@ -323,6 +324,51 @@ def region_material_warnings(material: Material, *, region_id: str) -> tuple[Val
             "measured data usually has thermal >= viscous. Check the values.",
         ),
     )
+
+
+# Air constants of the BEAT Engine porous and thermoviscous models (``THERMOVISCOUS_AIR``).
+AIR_DYNAMIC_VISCOSITY_PA_S = 1.84e-5
+AIR_THERMAL_CONDUCTIVITY_W_PER_M_K = 0.0257
+AIR_SPECIFIC_HEAT_J_PER_KG_K = 1005.0
+AIR_HEAT_CAPACITY_RATIO = 1.4
+
+
+def porous_wavelength_m(
+    material: Material, frequency_hz: float, *, density_kg_per_m3: float, sound_speed_m_per_s: float
+) -> float:
+    """Return the porous wavelength 2 pi / Re(k_eq), k_eq = omega sqrt(rho_eq / K_eq), of a porous Material.
+
+    Evaluates the engine's JCAL equivalent fluid (JCA with k0' = phi Lambda'^2 / 8, limp frame by
+    Panneton's density) as documented in BEAT Engine ``docs/Porous Materials.md`` (Equivalent fluid);
+    ``density_kg_per_m3``/``sound_speed_m_per_s`` are the region's air.
+    """
+
+    if not material.is_porous:
+        raise ValueError("A porous wavelength needs a porous material.")
+    parameters = dict(material.parameters)
+    rho0 = float(density_kg_per_m3)
+    omega = 2.0 * math.pi * float(frequency_hz)
+    jw = 1j * omega
+    eta, gamma = AIR_DYNAMIC_VISCOSITY_PA_S, AIR_HEAT_CAPACITY_RATIO
+    prandtl = eta * AIR_SPECIFIC_HEAT_J_PER_KG_K / AIR_THERMAL_CONDUCTIVITY_W_PER_M_K
+    phi = parameters["porosity"]
+    alpha = parameters["tortuosity"]
+    viscous_length = parameters["viscous_characteristic_length_m"]
+    thermal_length = parameters["thermal_characteristic_length_m"]
+    k0_thermal = parameters.get("static_thermal_permeability_m2", phi * thermal_length**2 / 8.0)
+    nu = eta / rho0
+    q0 = eta / parameters["flow_resistivity_pa_s_per_m2"]
+    g = cmath.sqrt(1.0 + (2.0 * alpha * q0 / (phi * viscous_length)) ** 2 * jw / nu)
+    rho = rho0 * (alpha + nu * phi / (jw * q0) * g)
+    nu_thermal = nu / prandtl
+    g_thermal = cmath.sqrt(1.0 + (2.0 * k0_thermal / (phi * thermal_length)) ** 2 * jw / nu_thermal)
+    bulk_air = rho0 * float(sound_speed_m_per_s) ** 2  # gamma P0
+    bulk = bulk_air / (gamma - (gamma - 1.0) / (1.0 + nu_thermal * phi / (jw * k0_thermal) * g_thermal))
+    rho_eq, bulk_eq = rho / phi, bulk / phi
+    if material.frame == MATERIAL_FRAME_LIMP:
+        total = parameters["frame_density_kg_per_m3"] + phi * rho0
+        rho_eq = (total * rho_eq - rho0**2) / (total + rho_eq - 2.0 * rho0)
+    return 2.0 * math.pi / (omega * cmath.sqrt(rho_eq / bulk_eq)).real
 
 
 def _finite_number(raw: Any) -> float | None:

@@ -242,6 +242,19 @@ class ValidationWarning:
 
 
 @dataclass(frozen=True)
+class RegionSeam:
+    """Faces shared by two bounded regions on one mesh and assigned on neither side.
+
+    Sound passes through a seam without a boundary or interface; the engine
+    shares the seam vertices. Compiler output only, never sent to the engine.
+    """
+
+    region_ids: tuple[str, str]
+    mesh_id: str
+    face_count: int
+
+
+@dataclass(frozen=True)
 class CompiledPhysicalSystem:
     id: str
     name: str
@@ -257,6 +270,7 @@ class CompiledPhysicalSystem:
     metadata: dict[str, JsonValue] = field(default_factory=dict)
     # Validation-time findings; not part of the engine wire contract.
     warnings: tuple[ValidationWarning, ...] = ()
+    region_seams: tuple[RegionSeam, ...] = ()
 
 
 def physical_system_to_dict(system: PhysicalSystem) -> dict[str, Any]:

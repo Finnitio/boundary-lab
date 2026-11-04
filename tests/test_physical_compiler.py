@@ -616,6 +616,61 @@ def test_compiler_rejects_wall_treatments_on_porous_region_boundaries(parameters
     ) in caught.value.issues
 
 
+RADIATING_TUBE_EXAMPLE = REPO_ROOT / "examples" / "radiating_filled_tube" / "radiating_filled_tube.blab.json"
+
+
+def _example_system(project: Path, *, loss_model=None) -> PhysicalSystem:
+    raw = json.loads(project.read_text(encoding="utf-8"))["physical_system"]
+    if loss_model is not None:
+        for region in raw["regions"]:
+            if region["kind"] == "bounded_air":
+                region["loss_model"] = loss_model
+    system = physical_system_from_dict(raw)
+    return replace(system, meshes=tuple(replace(mesh, file=str(project.parent / mesh.file)) for mesh in system.meshes))
+
+
+def test_coupled_cpu_backend_accepts_porous_region_at_interface_to_exterior() -> None:
+    compiled = PhysicalSystemCompiler().compile(_example_system(RADIATING_TUBE_EXAMPLE))
+
+    (interface,) = compiled.interfaces
+    boundaries = {boundary.id: boundary for boundary in compiled.boundaries}
+    fill = next(
+        region for region in compiled.regions if region.id == boundaries[interface.bounded_boundary_id].region_id
+    )
+    assert fill.loss_model == SOFT_FIBROUS_JCA
+    assert len(interface.topology.bem_face_indices) == 6
+    request = SystemSolveRequest(
+        compiled_system=compiled, frequencies_hz=(700.0,), excitation_port_ids=("excitation:piston",)
+    )
+
+    session = CoupledProductionBackend(bem_backend="cpu").create_system_session(request)
+
+    assert session.request.solver_options["bem_backend"] == "cpu"
+    wire = compiled_system_to_dict(session.request.compiled_system)
+    assert next(region for region in wire["regions"] if region["id"] == fill.id)["loss_model"] == SOFT_FIBROUS_JCA
+
+
+@pytest.mark.parametrize(
+    ("project", "loss_model"),
+    (
+        (RADIATING_TUBE_EXAMPLE, {}),
+        (RADIATING_TUBE_EXAMPLE, {"model": "air", "bulk_loss_factor": 0.02}),
+        (REPO_ROOT / "examples" / "Vented_Sub" / "vented_sub.blab.json", None),
+    ),
+)
+def test_air_only_coupled_systems_send_their_loss_models_unchanged(project, loss_model) -> None:
+    system = _example_system(project, loss_model=loss_model)
+    symmetry = json.loads(project.read_text(encoding="utf-8"))["symmetry"]
+    compiled = PhysicalSystemCompiler().compile(system, symmetry_mode=symmetry)
+
+    authored = {region.id: region.loss_model for region in system.regions}
+    assert {region.id: region.loss_model for region in compiled.regions} == authored
+    wire = compiled_system_to_dict(compiled)
+    assert {region["id"]: region["loss_model"] for region in wire["regions"]} == authored
+    statements = {item.statement for item in compiled.assumptions}
+    assert not any("porous equivalent fluid" in statement for statement in statements)
+
+
 def test_coupled_backend_rejects_invalid_region_materials_before_starting_julia() -> None:
     compiled = PhysicalSystemCompiler().compile(_fixture_system())
     unbounded = next(region for region in compiled.regions if region.kind == AcousticRegionKind.UNBOUNDED_AIR)

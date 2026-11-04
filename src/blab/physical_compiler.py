@@ -20,6 +20,7 @@ from blab.acoustic_materials import (
     WALL_IMPEDANCE_KEY,
     MaterialError,
     boundary_thermoviscous_wall_losses,
+    porous_wavelength_m,
     region_material,
     region_material_warnings,
     wall_impedance_parameters,
@@ -33,7 +34,13 @@ from blab.component_symmetry import (
     infer_weighted_surface_area,
 )
 from blab.config import normalize_symmetry
-from blab.fem_topology import selected_volume_surface_tags
+from blab.fem_topology import (
+    mean_tetrahedron_edge_length,
+    selected_tetrahedra,
+    selected_volume_exterior_faces,
+    selected_volume_surface_tags,
+    triangle_tags_by_face,
+)
 from blab.interface_conform import InterfaceConformError, build_conforming_interface_map
 from blab.mesh_data import read_resource_mesh
 from blab.physical_model import (
@@ -56,6 +63,7 @@ from blab.physical_model import (
     PhysicalGroupRef,
     PhysicalSystem,
     PhysicsAssumption,
+    RegionSeam,
     ResolvedPhysicalGroup,
     ValidationWarning,
 )
@@ -85,7 +93,10 @@ class PhysicalSystemCompiler:
         system: PhysicalSystem,
         *,
         symmetry_mode: str = "off",
+        freq_max_hz: float | None = None,
     ) -> CompiledPhysicalSystem:
+        """Compile ``system``; with ``freq_max_hz`` also check porous mesh resolution at that frequency."""
+
         symmetry = normalize_symmetry(symmetry_mode)
         self._validate_authoring_model(system)
         meshes_by_id = {mesh.id: mesh for mesh in system.meshes}
@@ -95,6 +106,7 @@ class PhysicalSystemCompiler:
         compiled_boundaries_by_id = {boundary.id: boundary for boundary in compiled_boundaries}
         compiled_components, impedance_normalization = self._compile_components(system, symmetry)
 
+        region_seams = self._region_seams(compiled_regions, compiled_boundaries, meshes_by_id)
         self._validate_boundary_coverage(compiled_regions, compiled_boundaries, meshes_by_id)
         compiled_interfaces = tuple(
             self._compile_interface(
@@ -122,7 +134,13 @@ class PhysicalSystemCompiler:
             assumptions=self._assumptions(system),
             source_model_version=system.model_version,
             metadata=metadata,
-            warnings=self._warnings(system),
+            warnings=self._warnings(system)
+            + (
+                ()
+                if freq_max_hz is None
+                else self._mesh_resolution_warnings(compiled_regions, meshes_by_id, freq_max_hz)
+            ),
+            region_seams=region_seams,
             contract_version=2
             if any(
                 component.kind == ComponentKind.IDEAL_VELOCITY_SOURCE
@@ -533,6 +551,57 @@ class PhysicalSystemCompiler:
             warnings.extend(region_material_warnings(material, region_id=region.id))
         return tuple(warnings)
 
+    def _mesh_resolution_warnings(
+        self,
+        regions: tuple[CompiledRegion, ...],
+        meshes_by_id: dict[str, MeshResource],
+        freq_max_hz: float,
+    ) -> tuple[ValidationWarning, ...]:
+        """Warn per porous region whose mean tetrahedron edge exceeds the engine's convergence-study
+        threshold (``porous_mesh_edge_length_m``) for its element order at ``freq_max_hz``."""
+
+        from beat_engine.beat_contract import porous_mesh_edge_length_m, porous_mesh_resolution
+
+        warnings: list[ValidationWarning] = []
+        resolution = porous_mesh_resolution()
+        target_error = float(resolution["target_relative_impedance_error"])
+        for region in regions:
+            material = region_material(region.loss_model, region_id=region.id, bounded=True)
+            if not material.is_porous:
+                continue
+            wavelength_m = porous_wavelength_m(
+                material,
+                freq_max_hz,
+                density_kg_per_m3=region.density_kg_per_m3,
+                sound_speed_m_per_s=region.sound_speed_m_per_s,
+            )
+            for mesh_id in region.mesh_ids:
+                resource = meshes_by_id[mesh_id]
+                mesh = self._read_mesh(resource)
+                tetrahedra = selected_tetrahedra(
+                    mesh, {int(group.tag) for group in region.volume_groups if group.mesh_id == mesh_id}
+                )
+                if not len(tetrahedra):
+                    continue
+                element_order = 2 if tetrahedra.shape[1] == 10 else 1
+                edge_m = mean_tetrahedron_edge_length(np.asarray(mesh.points) * float(resource.scale_to_m), tetrahedra)
+                needed_m = porous_mesh_edge_length_m(wavelength_m, element_order)
+                if edge_m <= needed_m:
+                    continue
+                elements = resolution["min_elements_per_wavelength"][str(element_order)]
+                warnings.append(
+                    ValidationWarning(
+                        code="porous_mesh_too_coarse",
+                        region_id=region.id,
+                        message=f"Region '{region.id}' {material.model.upper()} mesh on '{mesh_id}' is too coarse "
+                        f"at {freq_max_hz:g} Hz: mean P{element_order} tetrahedron edge {edge_m * 1e3:.2f} mm, needed "
+                        f"<= {needed_m * 1e3:.2f} mm ({elements} elements per porous wavelength "
+                        f"{wavelength_m * 1e3:.1f} mm, about {target_error:.0%} input-impedance error otherwise). "
+                        f"Set a volume mesh size of {needed_m * 1e3:.2f} mm or less for this region.",
+                    )
+                )
+        return tuple(warnings)
+
     @staticmethod
     def _porous_region_models(system: PhysicalSystem) -> dict[str, str]:
         """Map each region with a valid porous material to its model; invalid ones are reported elsewhere."""
@@ -741,6 +810,78 @@ class PhysicalSystemCompiler:
             tag=int(tag),
             name=name,
         )
+
+    def _region_seams(
+        self,
+        regions: tuple[CompiledRegion, ...],
+        compiled_boundaries: tuple[CompiledBoundary, ...],
+        meshes_by_id: dict[str, MeshResource],
+    ) -> tuple[RegionSeam, ...]:
+        """Classify the faces shared by two bounded regions on one mesh (mirrors the engine).
+
+        Unassigned on both sides: a region seam. Assigned on both sides: a thin rigid
+        partition (each side keeps its own boundary). Assigned on one side only: rejected,
+        because the engine would have to drop one side's boundary.
+        """
+
+        bounded = [region for region in regions if region.kind == AcousticRegionKind.BOUNDED_AIR]
+        seams: list[RegionSeam] = []
+        issues: list[str] = []
+        for mesh_id in dict.fromkeys(mesh_id for region in bounded for mesh_id in region.mesh_ids):
+            on_mesh = [region for region in bounded if mesh_id in region.mesh_ids]
+            if len(on_mesh) < 2:
+                continue
+            mesh = self._read_mesh(meshes_by_id[mesh_id])
+            exterior_faces = {}
+            for region in on_mesh:
+                volume_tags = {int(group.tag) for group in region.volume_groups if group.mesh_id == mesh_id}
+                try:
+                    exterior_faces[region.id] = selected_volume_exterior_faces(mesh, volume_tags)
+                except ValueError:
+                    continue  # reported by the boundary coverage check
+            assigned_tags = {
+                region.id: {
+                    boundary.group.tag
+                    for boundary in compiled_boundaries
+                    if boundary.region_id == region.id and boundary.group.mesh_id == mesh_id
+                }
+                for region in on_mesh
+            }
+            tags_by_face = triangle_tags_by_face(mesh)
+            for index, first in enumerate(on_mesh):
+                for second in on_mesh[index + 1 :]:
+                    if first.id not in exterior_faces or second.id not in exterior_faces:
+                        continue
+                    shared = exterior_faces[first.id] & exterior_faces[second.id]
+                    if not shared:
+                        continue
+                    seam_faces = 0
+                    one_sided: dict[str, set[int]] = {first.id: set(), second.id: set()}
+                    for face in shared:
+                        tags = tags_by_face.get(face, frozenset())
+                        by_first = tags & assigned_tags[first.id]
+                        by_second = tags & assigned_tags[second.id]
+                        if not by_first and not by_second:
+                            seam_faces += 1
+                        elif not by_first or not by_second:
+                            one_sided[first.id if by_first else second.id].update(by_first or by_second)
+                    for owner, tags in one_sided.items():
+                        if not tags:
+                            continue
+                        other = second.id if owner == first.id else first.id
+                        names = [self._name_for_tag(mesh, tag, 2, required=False) or str(tag) for tag in sorted(tags)]
+                        issues.append(
+                            f"Regions '{first.id}' and '{second.id}' share faces on mesh '{mesh_id}' that are "
+                            f"assigned only by region '{owner}' ({', '.join(names)}). Assign the shared faces in "
+                            f"region '{other}' too (a thin rigid partition) or in neither region (a region seam)."
+                        )
+                    if seam_faces:
+                        seams.append(
+                            RegionSeam(region_ids=(first.id, second.id), mesh_id=mesh_id, face_count=seam_faces)
+                        )
+        if issues:
+            raise PhysicalModelCompileError(issues)
+        return tuple(seams)
 
     def _validate_boundary_coverage(
         self,

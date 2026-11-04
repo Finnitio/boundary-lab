@@ -72,6 +72,12 @@ Validation migrates the project schema, resolves paths relative to the project,
 loads and compiles all meshes and physical groups, checks backend capabilities,
 and reports the solve kind, assumptions, mesh hashes, excitations, outputs, and
 frequency range. It does not launch Julia or assemble solver matrices.
+Findings that do not block a solve are listed under `warnings` as
+`{code, region_id, message}`. `porous_mesh_too_coarse` flags a porous region
+whose mean tetrahedron edge is longer than the BEAT Engine convergence-study
+threshold at the maximum solve frequency (11 P1 or 3 P2 elements per porous
+wavelength, about 5 % input-impedance error); the message gives the needed edge
+length, which can be set as the region's volume mesh size.
 
 Run the project using its saved frequency, polar, sphere, symmetry, channel, and
 observation-plane settings:
