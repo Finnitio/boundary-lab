@@ -572,3 +572,48 @@ def test_solve_plan_accepts_interior_porous_regions_on_any_backend() -> None:
 
     for backend_id in ("beat_rocm", "beat_metal"):
         prepare_headless_solve(project, load_headless_solve_spec(None), backend_id=backend_id)
+
+
+RADIATING_FILLED_TUBE = (
+    Path(__file__).parents[1] / "examples" / "radiating_filled_tube" / "radiating_filled_tube.blab.json"
+)
+
+
+def _coupled_request_with_seam(*, loss_factors: tuple[float, float]):
+    """The radiating tube's coupled request, its bounded region split into two Air regions joined by a seam."""
+
+    from blab.physical_model import RegionSeam
+
+    project = headless_module.load_headless_project(RADIATING_FILLED_TUBE)
+    request = prepare_headless_solve(project, load_headless_solve_spec(None), backend_id="beat_cpu").request
+    exterior, bounded = request.compiled_system.regions
+    regions = (
+        exterior,
+        replace(bounded, id="region:front", loss_model={"bulk_loss_factor": loss_factors[0]}),
+        replace(bounded, id="region:back", loss_model={"bulk_loss_factor": loss_factors[1]}),
+    )
+    seam = RegionSeam(region_ids=("region:front", "region:back"), mesh_id="mesh:tube", face_count=8)
+    return replace(request, compiled_system=replace(request.compiled_system, regions=regions, region_seams=(seam,)))
+
+
+@pytest.mark.parametrize("backend", ["rocm", "metal"])
+def test_coupled_seam_between_different_bulk_losses_is_rejected_on_per_node_backends(backend: str) -> None:
+    from blab.solvers.coupled_backend import validate_backend_capabilities
+
+    request = _coupled_request_with_seam(loss_factors=(0.01, 0.0))
+
+    with pytest.raises(
+        ValueError, match=rf"{backend} backend.*equal bulk loss.*'region:front' and 'region:back'.*cpu or cuda"
+    ):
+        validate_backend_capabilities(request, backend)
+
+
+@pytest.mark.parametrize(
+    ("backend", "loss_factors"), [("cpu", (0.01, 0.0)), ("cuda", (0.01, 0.0)), ("rocm", (0.01, 0.01))]
+)
+def test_coupled_seam_is_accepted_with_per_region_operators_or_equal_bulk_loss(
+    backend: str, loss_factors: tuple[float, float]
+) -> None:
+    from blab.solvers.coupled_backend import validate_backend_capabilities
+
+    validate_backend_capabilities(_coupled_request_with_seam(loss_factors=loss_factors), backend)

@@ -598,21 +598,36 @@ def validate_solve_plan(request: SystemSolveRequest, *, bem_backend: str | None 
 def validate_backend_capabilities(request: SystemSolveRequest, bem_backend: str) -> None:
     """Reject features the selected BEAT backend cannot solve (``bem_backend`` is an engine name)."""
 
-    regions = request.compiled_system.regions
+    system = request.compiled_system
+    regions = system.regions
     if not any(region.kind == AcousticRegionKind.UNBOUNDED_AIR for region in regions):
         return  # Interior FEM always solves on CPU; exterior BEM has no region materials.
-    porous_region_ids = [
-        region.id
+    if bem_backend in PER_REGION_MATERIAL_BACKENDS:
+        return
+    materials = {
+        region.id: region_material(region.loss_model, region_id=region.id, bounded=True)
         for region in regions
         if region.kind == AcousticRegionKind.BOUNDED_AIR
-        and region_material(region.loss_model, region_id=region.id, bounded=True).is_porous
-    ]
-    if porous_region_ids and bem_backend not in PER_REGION_MATERIAL_BACKENDS:
+    }
+    porous_region_ids = [region_id for region_id, material in materials.items() if material.is_porous]
+    alternatives = " or ".join(PER_REGION_MATERIAL_BACKENDS)
+    if porous_region_ids:
         raise ValueError(
             f"Porous region materials are not supported on the {bem_backend} backend in coupled FEM-BEM solves "
             f"(regions {', '.join(repr(region_id) for region_id in porous_region_ids)}); use the "
-            f"{' or '.join(PER_REGION_MATERIAL_BACKENDS)} backend."
+            f"{alternatives} backend."
         )
+    # Mirrors BEAT Engine ``require_uniform_seam_bulk_loss``: these backends scale FEM mass rows
+    # per node, which is single-valued at a seam node only when both regions agree.
+    for seam in getattr(system, "region_seams", ()):
+        first, second = seam.region_ids
+        if materials[first].bulk_loss_factor != materials[second].bulk_loss_factor:
+            raise ValueError(
+                f"The {bem_backend} backend supports coupled FEM-BEM region seams only between regions with equal "
+                f"bulk loss; the seam between '{first}' and '{second}' joins "
+                f"{materials[first].bulk_loss_factor:g} and {materials[second].bulk_loss_factor:g}. Use the "
+                f"{alternatives} backend or equal bulk loss factors."
+            )
 
 
 def validate_interior_capabilities(request: SystemSolveRequest) -> None:

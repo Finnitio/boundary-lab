@@ -655,7 +655,8 @@ rejected during application preparation or backend validation:
   rigid-backed treatment on bounded rigid walls is supported);
 - spatially varying acoustic material loss within one FEM region (one
   homogeneous Material per bounded region is supported);
-- porous regions on the ROCm and Metal backends;
+- porous regions on the ROCm and Metal backends, and on those backends region
+  seams between regions with different FEM bulk loss factors;
 - `Mms` input or automatic conversion from conventional T/S parameter sets;
 - passive radiators;
 - nonideal amplifier/source impedance;

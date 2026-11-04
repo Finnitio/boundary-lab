@@ -459,7 +459,9 @@ A porous region may have rigid and moving boundaries, interfaces to the
 exterior, and region seams. Wall Impedance, thermoviscous wall losses, and
 plane-wave terminations on its boundaries stop the solve with a message naming
 the boundary, because the material already carries the losses. Coupled porous
-projects solve with BEAT Engine CPU or CUDA; ROCm and Metal reject them.
+projects solve with BEAT Engine CPU or CUDA; ROCm and Metal reject them, and
+also reject a coupled region seam between Air regions with different bulk loss
+factors.
 
 A porous region needs a finer mesh than air: at least 11 first-order or 3
 second-order elements per porous wavelength at the highest solve frequency.
