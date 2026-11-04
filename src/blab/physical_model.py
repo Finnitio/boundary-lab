@@ -230,6 +230,19 @@ class PhysicsAssumption:
 
 
 @dataclass(frozen=True)
+class RegionSeam:
+    """Faces shared by two bounded regions on one mesh and assigned on neither side.
+
+    Sound passes through a seam without a boundary or interface; the engine
+    shares the seam vertices. Compiler output only, never sent to the engine.
+    """
+
+    region_ids: tuple[str, str]
+    mesh_id: str
+    face_count: int
+
+
+@dataclass(frozen=True)
 class CompiledPhysicalSystem:
     id: str
     name: str
@@ -243,6 +256,7 @@ class CompiledPhysicalSystem:
     source_model_version: int = PHYSICAL_MODEL_VERSION
     contract_version: int = COMPILED_SYSTEM_VERSION
     metadata: dict[str, JsonValue] = field(default_factory=dict)
+    region_seams: tuple[RegionSeam, ...] = ()
 
 
 def physical_system_to_dict(system: PhysicalSystem) -> dict[str, Any]:

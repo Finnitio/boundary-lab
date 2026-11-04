@@ -385,6 +385,7 @@ def validation_summary(
         "output_ids": [output.id for output in request.outputs],
         "meshes": mesh_entries,
         "region_materials": _region_material_entries(request.compiled_system),
+        "region_seams": _region_seam_entries(request.compiled_system),
         "assumptions": [
             {"status": item.status.value, "statement": item.statement} for item in request.compiled_system.assumptions
         ],
@@ -446,6 +447,7 @@ class HeadlessResultWriter:
             "engine_runs": [],
             "meshes": _mesh_manifest_entries(prepared.request.compiled_system),
             "region_materials": _region_material_entries(prepared.request.compiled_system),
+            "region_seams": _region_seam_entries(prepared.request.compiled_system),
             "completion_mask": self.completion.tolist(),
             "results": self.results,
         }
@@ -833,6 +835,15 @@ def _mesh_manifest_entries(system) -> list[dict[str, Any]]:
             }
         )
     return entries
+
+
+def _region_seam_entries(system) -> list[dict[str, Any]]:
+    """Faces two bounded regions share on one mesh without an assignment (sound passes through)."""
+
+    return [
+        {"region_ids": list(seam.region_ids), "mesh_id": seam.mesh_id, "face_count": seam.face_count}
+        for seam in system.region_seams
+    ]
 
 
 def _region_material_entries(system) -> list[dict[str, Any]]:
