@@ -21,8 +21,8 @@ from blab.acoustic_materials import (
     WALL_IMPEDANCE_KEY,
     MaterialError,
     boundary_thermoviscous_wall_losses,
+    material_of_region,
     porous_wavelength_m,
-    region_material,
     region_material_warnings,
     wall_impedance_parameters,
 )
@@ -537,9 +537,7 @@ class PhysicalSystemCompiler:
             issues.append(f"Region '{region.id}' sound speed and density must be finite and positive.")
         self._validate_json_mapping(region.loss_model, owner=f"Region '{region.id}' loss_model", issues=issues)
         try:
-            region_material(
-                region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
-            )
+            material_of_region(region)
         except MaterialError as exc:
             issues.extend(exc.issues)
 
@@ -547,9 +545,7 @@ class PhysicalSystemCompiler:
     def _warnings(system: PhysicalSystem) -> tuple[ValidationWarning, ...]:
         warnings: list[ValidationWarning] = []
         for region in system.regions:
-            material = region_material(
-                region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
-            )
+            material = material_of_region(region)
             warnings.extend(region_material_warnings(material, region_id=region.id))
         return tuple(warnings)
 
@@ -568,7 +564,7 @@ class PhysicalSystemCompiler:
         resolution = porous_mesh_resolution()
         target_error = float(resolution["target_relative_impedance_error"])
         for region in regions:
-            material = region_material(region.loss_model, region_id=region.id, bounded=True)
+            material = material_of_region(region)
             if not material.is_porous:
                 continue
             wavelength_m = porous_wavelength_m(
@@ -611,9 +607,7 @@ class PhysicalSystemCompiler:
         models = {}
         for region in system.regions:
             try:
-                material = region_material(
-                    region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
-                )
+                material = material_of_region(region)
             except MaterialError:
                 continue
             if material.is_porous:
@@ -711,9 +705,7 @@ class PhysicalSystemCompiler:
         """Porous materials compile to the normalized engine wire form; Air passes through unchanged
         so air-only requests stay byte-identical."""
 
-        material = region_material(
-            region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
-        )
+        material = material_of_region(region)
         return material.to_loss_model() if material.is_porous else dict(region.loss_model)
 
     def _compile_boundary(
@@ -1084,12 +1076,7 @@ class PhysicalSystemCompiler:
                 PhysicsAssumption(AssumptionStatus.INCLUDED, "Independent reference-excitation transfer basis")
             )
             assumptions.append(PhysicsAssumption(AssumptionStatus.EXCLUDED, "Application DSP and channel synthesis"))
-        materials = [
-            region_material(
-                region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
-            )
-            for region in system.regions
-        ]
+        materials = [material_of_region(region) for region in system.regions]
         if any(material.bulk_loss_factor > 0.0 for material in materials):
             assumptions.append(PhysicsAssumption(AssumptionStatus.INCLUDED, "Homogeneous per-region FEM bulk loss"))
         porous_labels = sorted(

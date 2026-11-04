@@ -19,7 +19,7 @@ from blab.acoustic_materials import (
     BOUNDARY_THERMOVISCOUS_LOSS_KEY,
     WALL_IMPEDANCE_KEY,
     boundary_thermoviscous_wall_losses,
-    region_material,
+    material_of_region,
     wall_impedance_parameters,
 )
 from blab.config import DEFAULT_CHANNEL_VOLTAGE_V
@@ -605,9 +605,7 @@ def validate_backend_capabilities(request: SystemSolveRequest, bem_backend: str)
     if bem_backend in PER_REGION_MATERIAL_BACKENDS:
         return
     materials = {
-        region.id: region_material(region.loss_model, region_id=region.id, bounded=True)
-        for region in regions
-        if region.kind == AcousticRegionKind.BOUNDED_AIR
+        region.id: material_of_region(region) for region in regions if region.kind == AcousticRegionKind.BOUNDED_AIR
     }
     porous_region_ids = [region_id for region_id, material in materials.items() if material.is_porous]
     alternatives = " or ".join(PER_REGION_MATERIAL_BACKENDS)
@@ -811,7 +809,7 @@ def validate_exterior_capabilities(request: SystemSolveRequest) -> None:
 
 def _validate_region_materials(regions) -> None:
     for region in regions:
-        region_material(region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR)
+        material_of_region(region)
 
 
 def _validate_boundary_motion_weights(component) -> None:

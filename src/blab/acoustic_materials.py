@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from importlib import resources
 from typing import Any, Mapping
 
-from blab.physical_model import ValidationWarning
+from blab.physical_model import AcousticRegionKind, ValidationWarning
 
 REGION_BULK_LOSS_FACTOR_KEY = "bulk_loss_factor"
 REGION_MATERIAL_MODEL_KEY = "model"
@@ -256,6 +256,14 @@ def region_material(loss_model: Mapping[str, Any] | None, *, region_id: str, bou
     if issues:
         raise MaterialError(tuple(issues))
     return Material(model=model, bulk_loss_factor=bulk_loss_factor)
+
+
+def material_of_region(region: Any) -> Material:
+    """Return the Material of an ``AcousticRegion`` or ``CompiledRegion`` (``MaterialError`` if invalid)."""
+
+    return region_material(
+        region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
+    )
 
 
 def _porous_material(loss_model: Mapping[str, Any], model: str, *, owner: str, bounded: bool) -> Material:

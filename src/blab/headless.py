@@ -14,14 +14,14 @@ from typing import Any, Callable, Iterable
 
 import numpy as np
 
-from blab.acoustic_materials import region_material
+from blab.acoustic_materials import material_of_region
 from blab.generators.base import generated_mesh_id
 from blab.generators.registry import restore_generator_document
 from blab.generators.resources import active_assembly_system, generated_mesh_entries
 from blab.live import build_log_frequencies
 from blab.observation_planes import observation_planes_from_payload
 from blab.phasor import SOLVER_PHASOR_CONVENTION
-from blab.physical_model import AcousticRegionKind, PhysicalSolveKind, PhysicalSystem, physical_system_from_dict
+from blab.physical_model import PhysicalSolveKind, PhysicalSystem, physical_system_from_dict
 from blab.project.io import PROJECT_SCHEMA_VERSION, read_project_file
 from blab.project.model import ProjectPreferencesState, generator_documents_from_payload, generator_mesh_name
 from blab.solve_results import (
@@ -865,9 +865,7 @@ def _region_material_entries(system) -> list[dict[str, Any]]:
             "region_id": region.id,
             "name": region.name,
             "kind": region.kind.value,
-            "material": region_material(
-                region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
-            ).to_loss_model(),
+            "material": material_of_region(region).to_loss_model(),
         }
         for region in system.regions
     ]
