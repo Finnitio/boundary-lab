@@ -16,6 +16,7 @@ import pytest
 from PySide6.QtWidgets import QDockWidget  # noqa: E402
 
 from blab.ui.balloon import WAVEFRONT_LEVEL_DB, _contour_levels  # noqa: E402
+from blab.ui.dock_targets import CompassPosition, PanelDropTarget  # noqa: E402
 from conftest import balloon_raw_bundle  # noqa: E402
 
 DOCK_IDS = {"balloon_3d", "radar_slicer", "forward_beam_shape", "isobar_angle_slice"}
@@ -32,6 +33,24 @@ def test_every_view_is_a_dock_in_the_nested_workspace(balloon_window) -> None:
     assert set(_docks(balloon_window)) == DOCK_IDS
     assert balloon_window.workspace.isAnimated() is not None  # workspace is a real QMainWindow
     assert balloon_window.workspace.dockOptions() & balloon_window.workspace.DockOption.AllowNestedDocks
+
+
+def test_panel_drop_in_balloon_window_places_and_equalises_views(balloon_window, qapp) -> None:
+    balloon_window.resize(1600, 900)
+    balloon_window.show()
+    qapp.processEvents()
+    docks = _docks(balloon_window)
+    radar = docks["radar_slicer"]
+    isobar = docks["isobar_angle_slice"]
+
+    balloon_window.panel_docking.drop_panel(
+        radar,
+        PanelDropTarget.panel("isobar_angle_slice", CompassPosition.BOTTOM),
+    )
+    qapp.processEvents()
+
+    assert radar.y() > isobar.y()
+    assert abs(radar.height() - isobar.height()) <= 2
 
 
 def test_the_beam_shape_dock_starts_hidden(balloon_window) -> None:
