@@ -17,10 +17,9 @@ import numpy as np
 
 from blab.acoustic_materials import (
     BOUNDARY_THERMOVISCOUS_LOSS_KEY,
-    REGION_BULK_LOSS_FACTOR_KEY,
     WALL_IMPEDANCE_KEY,
     boundary_thermoviscous_wall_losses,
-    region_bulk_loss_factor,
+    region_material,
     wall_impedance_parameters,
 )
 from blab.config import DEFAULT_CHANNEL_VOLTAGE_V
@@ -494,16 +493,7 @@ def validate_coupled_capabilities(request: SystemSolveRequest) -> None:
         region = region_by_id[boundary.region_id]
         if boundary.kind != BoundaryKind.RIGID or region.kind != AcousticRegionKind.BOUNDED_AIR:
             raise ValueError(f"Wall impedance boundary '{boundary.id}' must be rigid and belong to bounded air.")
-    for region in system.regions:
-        unknown_loss_keys = set(region.loss_model) - {REGION_BULK_LOSS_FACTOR_KEY}
-        if unknown_loss_keys:
-            raise ValueError(
-                f"Coupled solver does not support acoustic loss parameters on '{region.id}': "
-                + ", ".join(sorted(unknown_loss_keys))
-            )
-        loss_factor = region_bulk_loss_factor(region.loss_model)
-        if region.kind != AcousticRegionKind.BOUNDED_AIR and loss_factor != 0.0:
-            raise ValueError(f"FEM bulk loss on '{region.id}' requires a bounded acoustic region.")
+    _validate_region_materials(system.regions)
     supported_component_kinds = {
         ComponentKind.IDEAL_VELOCITY_SOURCE,
         ComponentKind.ELECTRODYNAMIC_TRANSDUCER,
@@ -671,14 +661,7 @@ def validate_interior_capabilities(request: SystemSolveRequest) -> None:
         treatment = wall_impedance_parameters(boundary.parameters)
         if treatment is not None and boundary.kind != BoundaryKind.RIGID:
             raise ValueError(f"Wall impedance boundary '{boundary.id}' must use the rigid boundary assignment.")
-    for region in bounded_regions:
-        unknown_loss_keys = set(region.loss_model) - {REGION_BULK_LOSS_FACTOR_KEY}
-        if unknown_loss_keys:
-            raise ValueError(
-                f"Interior FEM solving does not support acoustic loss parameters on '{region.id}': "
-                + ", ".join(sorted(unknown_loss_keys))
-            )
-        region_bulk_loss_factor(region.loss_model)
+    _validate_region_materials(system.regions)
 
     supported_component_kinds = {
         ComponentKind.IDEAL_VELOCITY_SOURCE,
@@ -776,6 +759,11 @@ def validate_exterior_capabilities(request: SystemSolveRequest) -> None:
     lossy_regions = [region.id for region in system.regions if region.loss_model]
     if lossy_regions:
         raise ValueError("Exterior solver does not support region loss models on: " + ", ".join(lossy_regions))
+
+
+def _validate_region_materials(regions) -> None:
+    for region in regions:
+        region_material(region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR)
 
 
 def _validate_boundary_motion_weights(component) -> None:

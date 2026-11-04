@@ -1,9 +1,12 @@
 import pytest
 
 from blab.acoustic_materials import (
+    Material,
+    MaterialError,
     boundary_thermoviscous_wall_losses,
     miki_wall_impedance_parameters,
     region_bulk_loss_factor,
+    region_material,
     wall_impedance_parameters,
 )
 
@@ -47,3 +50,45 @@ def test_miki_wall_parameters_use_polyfill_defaults_and_round_trip() -> None:
 def test_wall_impedance_parameters_reject_invalid_values(parameters) -> None:
     with pytest.raises(ValueError):
         wall_impedance_parameters(parameters)
+
+
+@pytest.mark.parametrize(
+    ("loss_model", "bulk_loss_factor"),
+    (
+        (None, 0.0),
+        ({}, 0.0),
+        ({"bulk_loss_factor": 0.02}, 0.02),
+        ({"model": "air"}, 0.0),
+        ({"model": "air", "bulk_loss_factor": 0.005}, 0.005),
+    ),
+)
+def test_region_material_reads_legacy_and_explicit_air(loss_model, bulk_loss_factor) -> None:
+    material = region_material(loss_model, region_id="region:box", bounded=True)
+
+    assert material == Material(model="air", bulk_loss_factor=bulk_loss_factor)
+
+
+def test_region_material_reports_every_issue_with_the_region() -> None:
+    with pytest.raises(MaterialError) as caught:
+        region_material(
+            {"bulk_loss_factor": 1.5, "flow_resistivity": 5000.0, "foo": 1},
+            region_id="region:box",
+            bounded=True,
+        )
+
+    assert caught.value.issues == (
+        "Region 'region:box' uses unsupported loss parameters: flow_resistivity, foo.",
+        "Region 'region:box' FEM bulk loss factor must be a finite number between 0 and 1.",
+    )
+
+
+@pytest.mark.parametrize("model", ("jca", "", 3))
+def test_region_material_rejects_unknown_models(model) -> None:
+    with pytest.raises(MaterialError, match="unsupported material model"):
+        region_material({"model": model}, region_id="region:box", bounded=True)
+
+
+def test_region_material_rejects_bulk_loss_outside_bounded_air() -> None:
+    assert region_material({"bulk_loss_factor": 0.0}, region_id="region:far", bounded=False) == Material()
+    with pytest.raises(MaterialError, match="Region 'region:far' FEM bulk loss requires a bounded-air region"):
+        region_material({"bulk_loss_factor": 0.01}, region_id="region:far", bounded=False)

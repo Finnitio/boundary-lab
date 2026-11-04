@@ -504,6 +504,52 @@ def test_compiler_rejects_invalid_region_fem_bulk_loss_factor(loss_factor) -> No
         PhysicalSystemCompiler().compile(invalid)
 
 
+def test_compiler_reads_explicit_air_material_and_rejects_unknown_models() -> None:
+    system = _fixture_system()
+
+    def with_loss_model(loss_model):
+        return replace(
+            system,
+            regions=tuple(
+                replace(region, loss_model=loss_model) if region.kind == AcousticRegionKind.BOUNDED_AIR else region
+                for region in system.regions
+            ),
+        )
+
+    compiled = PhysicalSystemCompiler().compile(with_loss_model({"model": "air", "bulk_loss_factor": 0.01}))
+    interior = next(region for region in compiled.regions if region.kind == AcousticRegionKind.BOUNDED_AIR)
+    assert interior.loss_model == {"model": "air", "bulk_loss_factor": 0.01}
+    assert "Homogeneous per-region FEM bulk loss" in {item.statement for item in compiled.assumptions}
+
+    with pytest.raises(PhysicalModelCompileError, match="unsupported material model 'jca'"):
+        PhysicalSystemCompiler().compile(with_loss_model({"model": "jca"}))
+
+
+def test_coupled_backend_rejects_invalid_region_materials_before_starting_julia() -> None:
+    compiled = PhysicalSystemCompiler().compile(_fixture_system())
+    unbounded = next(region for region in compiled.regions if region.kind == AcousticRegionKind.UNBOUNDED_AIR)
+
+    def request(region_id, loss_model):
+        return SystemSolveRequest(
+            compiled_system=replace(
+                compiled,
+                regions=tuple(
+                    replace(region, loss_model=loss_model) if region.id == region_id else region
+                    for region in compiled.regions
+                ),
+            ),
+            frequencies_hz=(500.0,),
+            excitation_port_ids=("excitation:radiator",),
+        )
+
+    backend = CoupledProductionBackend(bem_backend="cpu")
+    with pytest.raises(ValueError, match=f"Region '{unbounded.id}' FEM bulk loss requires a bounded-air region"):
+        backend.create_system_session(request(unbounded.id, {"bulk_loss_factor": 0.01}))
+    interior = next(region for region in compiled.regions if region.kind == AcousticRegionKind.BOUNDED_AIR)
+    with pytest.raises(ValueError, match=f"Region '{interior.id}' uses unsupported material model 'jca'"):
+        backend.create_system_session(request(interior.id, {"model": "jca"}))
+
+
 def test_coupled_backend_accepts_region_fem_bulk_loss_and_wall_impedance() -> None:
     system = _fixture_system()
     configured = replace(

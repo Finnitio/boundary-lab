@@ -16,10 +16,10 @@ from blab.acoustic_impedance import (
     AcousticImpedanceNormalization,
 )
 from blab.acoustic_materials import (
-    REGION_BULK_LOSS_FACTOR_KEY,
     WALL_IMPEDANCE_KEY,
+    MaterialError,
     boundary_thermoviscous_wall_losses,
-    region_bulk_loss_factor,
+    region_material,
     wall_impedance_parameters,
 )
 from blab.component_symmetry import (
@@ -508,18 +508,12 @@ class PhysicalSystemCompiler:
         ):
             issues.append(f"Region '{region.id}' sound speed and density must be finite and positive.")
         self._validate_json_mapping(region.loss_model, owner=f"Region '{region.id}' loss_model", issues=issues)
-        unknown_loss_keys = sorted(set(region.loss_model) - {REGION_BULK_LOSS_FACTOR_KEY})
-        if unknown_loss_keys:
-            issues.append(
-                f"Region '{region.id}' uses unsupported loss parameters: " + ", ".join(unknown_loss_keys) + "."
-            )
         try:
-            bulk_loss_factor = region_bulk_loss_factor(region.loss_model)
-        except ValueError as exc:
-            issues.append(f"Region '{region.id}' {exc}")
-        else:
-            if region.kind != AcousticRegionKind.BOUNDED_AIR and bulk_loss_factor != 0.0:
-                issues.append(f"Region '{region.id}' FEM bulk loss requires a bounded-air region.")
+            region_material(
+                region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
+            )
+        except MaterialError as exc:
+            issues.extend(exc.issues)
 
     @staticmethod
     def _validate_group_ref(
@@ -882,7 +876,13 @@ class PhysicalSystemCompiler:
                 PhysicsAssumption(AssumptionStatus.INCLUDED, "Independent reference-excitation transfer basis")
             )
             assumptions.append(PhysicsAssumption(AssumptionStatus.EXCLUDED, "Application DSP and channel synthesis"))
-        if any(region_bulk_loss_factor(region.loss_model) > 0.0 for region in system.regions):
+        if any(
+            region_material(
+                region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
+            ).bulk_loss_factor
+            > 0.0
+            for region in system.regions
+        ):
             assumptions.append(PhysicsAssumption(AssumptionStatus.INCLUDED, "Homogeneous per-region FEM bulk loss"))
         else:
             assumptions.append(

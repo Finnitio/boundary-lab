@@ -150,3 +150,30 @@ def test_compression_driver_sparse_interior_fem_integration() -> None:
     assert result.diagnostics["formulation"] == "interior_fem_sparse"
     assert result.diagnostics["plane_wave_termination_boundary_ids"] == ["boundary:front-termination"]
     assert result.diagnostics["relative_residual"] < 1e-8
+
+
+@pytest.mark.parametrize(
+    ("loss_model", "message"),
+    (
+        ({"model": "jca"}, "uses unsupported material model 'jca'"),
+        ({"bulk_loss_factor": 0.002, "porosity": 0.98}, "uses unsupported loss parameters: porosity"),
+        ({"bulk_loss_factor": 2.0}, "FEM bulk loss factor must be a finite number between 0 and 1"),
+    ),
+)
+def test_interior_fem_rejects_invalid_region_materials_before_starting_julia(loss_model, message) -> None:
+    _project, prepared = _prepared()
+    system = prepared.request.compiled_system
+    region_id = system.regions[0].id
+    request = replace(
+        prepared.request,
+        compiled_system=replace(
+            system,
+            regions=tuple(
+                replace(region, loss_model=loss_model) if region.id == region_id else region
+                for region in system.regions
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match=f"Region '{region_id}' {message}"):
+        validate_system_capabilities(request)
