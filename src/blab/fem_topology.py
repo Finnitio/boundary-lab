@@ -12,6 +12,9 @@ _TETRAHEDRON_TYPES = {"tetra", "tetra4", "tetra10"}
 _TRIANGLE_TYPES = {"triangle", "triangle3", "triangle6"}
 
 
+Face = tuple[int, int, int]
+
+
 def selected_volume_surface_tags(
     mesh: meshio.Mesh,
     selected_volume_tags: Iterable[int],
@@ -23,16 +26,24 @@ def selected_volume_surface_tags(
     retained only when an explicit physical triangle exists on that face.
     """
 
+    exterior_faces = selected_volume_exterior_faces(mesh, selected_volume_tags)
+    return frozenset(
+        tag for face, tags in triangle_tags_by_face(mesh).items() if face in exterior_faces for tag in tags
+    )
+
+
+def selected_volume_exterior_faces(
+    mesh: meshio.Mesh,
+    selected_volume_tags: Iterable[int],
+) -> frozenset[Face]:
+    """Return the exterior faces (sorted corner-vertex triples) of the selected tetrahedra."""
+
     selected_tags = {int(tag) for tag in selected_volume_tags}
     if not selected_tags:
         raise ValueError("Select at least one physical FEM volume tag.")
-    physical_blocks = mesh.cell_data.get("gmsh:physical")
-    if physical_blocks is None or len(physical_blocks) != len(mesh.cells):
-        raise ValueError("FEM mesh elements do not contain aligned gmsh:physical tags.")
-
-    face_counts: Counter[tuple[int, int, int]] = Counter()
+    face_counts: Counter[Face] = Counter()
     selected_tetrahedron_count = 0
-    for block, raw_tags in zip(mesh.cells, physical_blocks, strict=True):
+    for block, raw_tags in zip(mesh.cells, _physical_blocks(mesh), strict=True):
         if block.type not in _TETRAHEDRON_TYPES:
             continue
         tetrahedra = np.asarray(block.data, dtype=np.int64)
@@ -53,10 +64,14 @@ def selected_volume_surface_tags(
     if selected_tetrahedron_count == 0:
         requested = ", ".join(map(str, sorted(selected_tags)))
         raise ValueError(f"Selected FEM volume tags contain no tetrahedra: {requested}.")
+    return frozenset(face for face, count in face_counts.items() if count == 1)
 
-    exterior_faces = {face for face, count in face_counts.items() if count == 1}
-    surface_tags: set[int] = set()
-    for block, raw_tags in zip(mesh.cells, physical_blocks, strict=True):
+
+def triangle_tags_by_face(mesh: meshio.Mesh) -> dict[Face, frozenset[int]]:
+    """Map each physical triangle's face (sorted corner-vertex triple) to its surface tags."""
+
+    tags_by_face: dict[Face, set[int]] = {}
+    for block, raw_tags in zip(mesh.cells, _physical_blocks(mesh), strict=True):
         if block.type not in _TRIANGLE_TYPES:
             continue
         triangles = np.asarray(block.data, dtype=np.int64)
@@ -64,9 +79,15 @@ def selected_volume_surface_tags(
         if triangles.ndim != 2 or triangles.shape[1] < 3 or tags.shape != (triangles.shape[0],):
             raise ValueError("FEM mesh physical-surface tags do not align with triangles.")
         for triangle, tag in zip(triangles[:, :3], tags, strict=True):
-            if tuple(sorted(map(int, triangle))) in exterior_faces:
-                surface_tags.add(int(tag))
-    return frozenset(surface_tags)
+            tags_by_face.setdefault(tuple(sorted(map(int, triangle))), set()).add(int(tag))
+    return {face: frozenset(tags) for face, tags in tags_by_face.items()}
 
 
-__all__ = ["selected_volume_surface_tags"]
+def _physical_blocks(mesh: meshio.Mesh) -> list:
+    physical_blocks = mesh.cell_data.get("gmsh:physical")
+    if physical_blocks is None or len(physical_blocks) != len(mesh.cells):
+        raise ValueError("FEM mesh elements do not contain aligned gmsh:physical tags.")
+    return physical_blocks
+
+
+__all__ = ["selected_volume_exterior_faces", "selected_volume_surface_tags", "triangle_tags_by_face"]
