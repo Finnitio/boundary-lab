@@ -362,6 +362,48 @@ def test_picked_faces_become_a_face_group_that_generates_a_rigid_boundary(
     assert sides_boundary.kind == "rigid"
 
 
+def test_face_groups_of_every_air_body_in_a_mesh_are_listed_in_system_boundaries_and_kept_on_ok(
+    cad_editor, main_window, monkeypatch, qapp, tmp_path
+):
+    """The chamber mesh holds the Chamber and Port bodies in one region; groups only on Port must not be lost."""
+    from blab.ui.main_window import geometry_workflow
+    from blab.ui.system_config import SystemConfigDialog
+
+    editor, host = cad_editor
+    interface_faces = {face for interface in editor.geometry["interfaces"] for face in interface["face_ids"]}
+    (port_wall,) = [
+        f["id"] for f in editor.geometry["faces"] if list(f["bodies"]) == ["Port"] and f["id"] not in interface_faces
+    ]
+    editor.pick_face(port_wall)
+    editor.group_selection("Port wall")
+    monkeypatch.setattr(geometry_workflow, "GENERATED_GEOMETRY_ROOT", tmp_path / "runs")
+    errors = []
+    monkeypatch.setattr(main_window, "show_error", lambda *args: errors.append(args))
+    host.generate(expected_revision=host.snapshot().revision)
+    wait(qapp, lambda: not main_window.geometry_controller.active)
+    assert not errors
+    before = main_window.project.physical_system
+
+    dialogs = []
+    monkeypatch.setattr(SystemConfigDialog, "exec", lambda dialog: dialogs.append(dialog) or 0)
+    main_window.open_system_config()
+    wait(qapp, lambda: dialogs)
+    (dialog,) = dialogs
+    table = dialog.boundaries_table
+    chamber = next(r for r in before.regions if r.kind == "bounded_air")
+    listed = {
+        table.item(row, 2).text()
+        for row in range(table.rowCount())
+        if table.item(row, 0).data(Qt.ItemDataRole.UserRole) == chamber.id
+    }
+    assert listed == {"walls", "Driver", "Interface 1 Port", "Port wall"}
+
+    applied = dialog.physical_system()
+    assert next(r for r in applied.regions if r.id == chamber.id).volume_groups == chamber.volume_groups
+    assert {b.id for b in applied.boundaries} == {b.id for b in before.boundaries}
+    assert len(PhysicalSystemCompiler().compile(applied).interfaces) == 1
+
+
 def all_rows(editor):
     table = editor.groups_table
     return {table.item(r, 0).text(): int(table.item(r, 1).text()) for r in range(table.rowCount())}

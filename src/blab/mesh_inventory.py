@@ -54,6 +54,14 @@ class AvailableSystemMesh:
             return self.surface_groups
         return dict(self.surface_groups_by_volume).get(volume_group, ())
 
+    def surface_groups_for_volumes(self, volume_groups: tuple[str, ...] | None) -> tuple[str, ...]:
+        """Surface groups next to any of ``volume_groups`` (all surface groups for ``None``), in inventory order."""
+        if volume_groups is None:
+            return self.surface_groups
+        by_volume = dict(self.surface_groups_by_volume)
+        groups = {group for volume in volume_groups for group in by_volume.get(volume, ())}
+        return tuple(group for group in self.surface_groups if group in groups)
+
 
 def inspect_system_meshes(meshes: tuple[MeshEntry, ...]) -> tuple[AvailableSystemMesh, ...]:
     """Read physical-group inventory without modifying imported mesh files."""

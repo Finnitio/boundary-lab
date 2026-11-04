@@ -264,19 +264,16 @@ class SystemConfigDialog(QDialog):
                 region = regions_by_id.get(boundary.region_id)
                 resource = resources_by_id.get(boundary.group.mesh_id)
                 mesh = None if resource is None else self._mesh_by_name.get(resource.name)
-                volume_group = next(
-                    (
-                        group.name
-                        for group in (() if region is None else region.volume_groups)
-                        if group.mesh_id == boundary.group.mesh_id
-                    ),
-                    None,
+                volume_groups = tuple(
+                    group.name
+                    for group in (() if region is None else region.volume_groups)
+                    if group.mesh_id == boundary.group.mesh_id
                 )
                 if (
                     region is not None
                     and region.kind == AcousticRegionKind.BOUNDED_AIR
                     and mesh is not None
-                    and boundary.group.name not in mesh.surface_groups_for_volume(volume_group)
+                    and boundary.group.name not in mesh.surface_groups_for_volumes(volume_groups or None)
                 ):
                     self._relocatable_boundary_ids.add(boundary.id)
         self._existing_components = {
@@ -471,7 +468,7 @@ class SystemConfigDialog(QDialog):
                 region_resources = tuple(
                     resource for mesh_id in region.mesh_ids if (resource := resources.get(mesh_id)) is not None
                 )
-                volume_name = region.volume_groups[0].name if region.volume_groups else None
+                volume_name = _volume_selection(tuple(group.name for group in region.volume_groups))
                 mesh_names = tuple(
                     mesh_name
                     for resource in region_resources
@@ -485,7 +482,7 @@ class SystemConfigDialog(QDialog):
                 if (
                     region.kind == AcousticRegionKind.BOUNDED_AIR
                     and available is not None
-                    and volume_name not in available.volume_groups
+                    and not set(_volume_names(volume_name)) <= set(available.volume_groups)
                     and len(available.volume_groups) == 1
                 ):
                     volume_name = available.volume_groups[0]
@@ -534,7 +531,7 @@ class SystemConfigDialog(QDialog):
         name: str,
         kind: AcousticRegionKind,
         mesh_name: str | tuple[str, ...] | None,
-        volume_group: str | None,
+        volume_group: str | tuple[str, ...] | None,
         region_id: str | None = None,
         loss_model: dict | None = None,
     ) -> None:
@@ -621,7 +618,7 @@ class SystemConfigDialog(QDialog):
         self.tabs.setTabEnabled(tab_index, interfaces_available)
         self.identify_interfaces_button.setEnabled(interfaces_available)
 
-    def _refresh_region_volume_combo(self, row: int, *, selected: str | None = None) -> None:
+    def _refresh_region_volume_combo(self, row: int, *, selected: str | tuple[str, ...] | None = None) -> None:
         if row >= self.regions_table.rowCount():
             return
         combo = self.regions_table.cellWidget(row, 3)
@@ -637,6 +634,9 @@ class SystemConfigDialog(QDialog):
         if bounded and mesh is not None:
             for name in mesh.volume_groups:
                 combo.addItem(name, name)
+            # A region spanning several volume groups of its mesh (an assembly's merged air bodies) keeps them all.
+            if isinstance(current, tuple) and set(current) <= set(mesh.volume_groups):
+                combo.addItem(", ".join(current), current)
         combo.setEnabled(bounded)
         index = combo.findData(current)
         combo.setCurrentIndex(max(index, 0))
@@ -711,7 +711,7 @@ class SystemConfigDialog(QDialog):
                     continue
                 mesh_region = dict(region, mesh_id=mesh_id)
                 group_names = (
-                    mesh.surface_groups_for_volume(region["volume_group"])
+                    mesh.surface_groups_for_volumes(region["volume_groups"])
                     if region["kind"] == AcousticRegionKind.BOUNDED_AIR
                     else mesh.surface_groups
                 )
@@ -1787,7 +1787,7 @@ class SystemConfigDialog(QDialog):
                     "kind": kind,
                     "mesh_names": mesh_names,
                     "mesh_ids": tuple(resource_ids[mesh_name] for mesh_name in mesh_names),
-                    "volume_group": None if volume_group is None else str(volume_group),
+                    "volume_groups": None if volume_group is None else _volume_names(volume_group),
                     "loss_model": (
                         _bounded_region_loss_model(material_button.property("loss_model"))
                         if kind == AcousticRegionKind.BOUNDED_AIR and isinstance(material_button, QPushButton)
@@ -1862,12 +1862,9 @@ class SystemConfigDialog(QDialog):
                     volume_groups=(
                         ()
                         if draft["kind"] == AcousticRegionKind.UNBOUNDED_AIR
-                        else (
-                            PhysicalGroupRef(
-                                mesh_id=draft["mesh_ids"][0],
-                                dimension=3,
-                                name=draft["volume_group"],
-                            ),
+                        else tuple(
+                            PhysicalGroupRef(mesh_id=draft["mesh_ids"][0], dimension=3, name=name)
+                            for name in draft["volume_groups"]
                         )
                     ),
                     sound_speed_m_per_s=343.0 if existing is None else existing.sound_speed_m_per_s,
@@ -1953,6 +1950,20 @@ class SystemConfigDialog(QDialog):
 
 
 _LOSSLESS_AIR = {REGION_BULK_LOSS_FACTOR_KEY: 0.0}
+
+
+def _volume_selection(names: tuple[str, ...]) -> str | tuple[str, ...] | None:
+    """A region's volume groups as its volume combo selects them: one name, several (a tuple), or none."""
+    if not names:
+        return None
+    return names[0] if len(names) == 1 else names
+
+
+def _volume_names(selection: str | tuple[str, ...] | None) -> tuple[str, ...]:
+    """The volume group names of a volume combo selection."""
+    if selection is None:
+        return ()
+    return (str(selection),) if isinstance(selection, str) else tuple(str(name) for name in selection)
 
 
 def _bounded_region_loss_model(raw) -> dict:
