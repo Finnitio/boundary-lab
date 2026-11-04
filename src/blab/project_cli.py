@@ -214,6 +214,8 @@ def _validate(args: argparse.Namespace) -> None:
         f"{summary['frequency_count']} frequencies, {len(summary['excitation_port_ids'])} excitations, "
         f"{len(summary['meshes'])} meshes."
     )
+    for warning in summary["warnings"]:
+        print(f"warning: [{warning['code']}] {warning['message']}")
     for assumption in summary["assumptions"]:
         print(f"[{assumption['status']}] {assumption['statement']}")
 

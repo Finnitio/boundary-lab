@@ -85,7 +85,7 @@ The JSON summary also lists:
   assigned in only one region is a validation error.
 - `warnings`: findings that do not block a solve, as
   `{code, region_id, message}`. The list is `[]` when there are none. The text
-  output of `validate` does not print them, so use `--json`.
+  output of `validate` prints each one as a `warning: [code] message` line.
 
 Warning codes:
 

@@ -479,6 +479,22 @@ def test_run_manifest_records_the_validation_warnings_the_run_was_made_despite(t
     assert "thermal characteristic length (60 um)" in warning["message"]
 
 
+def test_plain_text_validate_prints_each_warning(tmp_path: Path, capsys) -> None:
+    payload = json.loads(FILLED_TUBE.read_text(encoding="utf-8"))
+    payload["physical_system"]["regions"][0]["loss_model"]["thermal_characteristic_length_m"] = 60e-6
+    shutil.copy(FILLED_TUBE.with_suffix("").with_suffix(".msh"), tmp_path)
+    path = tmp_path / FILLED_TUBE.name
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    capsys.readouterr()
+    project_main(["validate", str(path), "--backend", "beat_cpu"], prog="blab project")
+    lines = capsys.readouterr().out.splitlines()
+
+    assert any(line.startswith("Valid ") for line in lines)
+    (warning,) = [line for line in lines if line.startswith("warning:")]
+    assert "porous_thermal_length_below_viscous_length" in warning and "Region 'region:fill'" in warning
+
+
 def test_validate_json_lists_no_warnings_for_a_regular_material(capsys) -> None:
     capsys.readouterr()
     project_main(["validate", str(FILLED_TUBE), "--backend", "beat_cpu", "--json"], prog="blab project")
