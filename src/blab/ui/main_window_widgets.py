@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import Callable, Literal
 
-from PySide6.QtCore import QPoint, QSize, Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QColor, QFont, QFontDatabase, QPalette
 from PySide6.QtWidgets import (
-    QApplication,
     QDockWidget,
     QFrame,
     QHBoxLayout,
@@ -22,9 +21,6 @@ from PySide6.QtWidgets import (
 
 from blab.ui.result_projection import VisualizationProjection
 from blab.ui.solve_progress import format_frequency_solve_timings
-
-if TYPE_CHECKING:
-    from blab.ui.dock_drag import PanelDockController
 
 
 @dataclass(frozen=True)
@@ -118,8 +114,6 @@ class DockTitleBar(QFrame):
         self.setFrameShadow(QFrame.Raised)
         self.setFixedHeight(DOCK_TITLE_BAR_HEIGHT)
         self.dock = dock
-        self._dock_controller: PanelDockController | None = None
-        self._drag_press_global: QPoint | None = None
         self.tool_buttons: list[QToolButton] = []
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 2, 2, 2)
@@ -161,39 +155,16 @@ class DockTitleBar(QFrame):
         return QSize(hint.width(), DOCK_TITLE_BAR_HEIGHT)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - Qt override
-        self._drag_press_global = None
         self.dock.setFloating(not self.dock.isFloating())
         event.accept()
 
-    def set_dock_controller(self, controller: PanelDockController) -> None:
-        self._dock_controller = controller
-
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt override
-        if event.button() == Qt.LeftButton and self._dock_controller is not None:
-            self._drag_press_global = event.globalPosition().toPoint()
-            event.accept()
-            return
         event.ignore()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt override
-        if (
-            self._drag_press_global is not None
-            and self._dock_controller is not None
-            and event.buttons() & Qt.LeftButton
-        ):
-            distance = (event.globalPosition().toPoint() - self._drag_press_global).manhattanLength()
-            if distance >= QApplication.startDragDistance():
-                self._drag_press_global = None
-                self._dock_controller.start_drag(self.dock, event.globalPosition().toPoint())
-            event.accept()
-            return
         event.ignore()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt override
-        if self._drag_press_global is not None:
-            self._drag_press_global = None
-            event.accept()
-            return
         event.ignore()
 
 

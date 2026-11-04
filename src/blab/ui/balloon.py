@@ -43,7 +43,6 @@ from blab.exporting import export_balloon_data, export_plot_png
 from blab.paths import APP_ROOT
 from blab.plotting import VisualizerConfig
 from blab.postprocess import _fractional_octave_smooth, _interpolate_isobar_heatmap
-from blab.ui.dock_drag import PanelDockController
 from blab.ui.file_dialogs import FileDialogService
 from blab.ui.main_window_widgets import DockTitleBar
 from blab.ui.plots import (
@@ -285,10 +284,6 @@ class BalloonPlotWindow(QMainWindow):
             [self.balloon_dock, self.radar_dock, self.wavefront_shape_dock, self.isobar_dock],
             [605, 345, 330, 380],
             Qt.Horizontal,
-        )
-        self.panel_docking = PanelDockController(
-            self.workspace,
-            (self.balloon_dock, self.radar_dock, self.wavefront_shape_dock, self.isobar_dock),
         )
         view_menu.addAction(self.balloon_dock.toggleViewAction())
         view_menu.addAction(self.radar_dock.toggleViewAction())
