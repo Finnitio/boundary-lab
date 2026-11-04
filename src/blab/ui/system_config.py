@@ -34,10 +34,8 @@ from PySide6.QtWidgets import (
 
 from blab.acoustic_materials import (
     BOUNDARY_THERMOVISCOUS_LOSS_KEY,
-    FEM_BULK_LOSS_FACTOR_OPTIONS,
     REGION_BULK_LOSS_FACTOR_KEY,
     boundary_thermoviscous_wall_losses,
-    region_bulk_loss_factor,
     wall_impedance_parameters,
 )
 from blab.component_symmetry import (
@@ -91,6 +89,7 @@ from blab.ui.component_editor import (
     _ComponentDraft,
     _ComponentEditorDialog,
 )
+from blab.ui.material_editor import RegionMaterialDialog, region_material_label
 
 INTERFACE_SEAM_SIMPLIFICATION_WARNING = (
     "Boundary Lab simplified a mismatched interface seam by collapsing redundant boundary edges. "
@@ -323,7 +322,7 @@ class SystemConfigDialog(QDialog):
 
     def _build_regions_tab(self) -> None:
         self.regions_table = QTableWidget(0, 5)
-        self.regions_table.setHorizontalHeaderLabels(["Name", "Type", "Mesh", "Volume Group", "FEM Bulk Loss Factor"])
+        self.regions_table.setHorizontalHeaderLabels(["Name", "Type", "Mesh", "Volume Group", "Material"])
         self.regions_table.verticalHeader().setVisible(False)
         self.regions_table.setAlternatingRowColors(True)
         self.regions_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -477,7 +476,7 @@ class SystemConfigDialog(QDialog):
                     mesh_name=mesh_names,
                     volume_group=volume_name,
                     region_id=region.id,
-                    bulk_loss_factor=region_bulk_loss_factor(region.loss_model),
+                    loss_model=region.loss_model,
                 )
             return
         exterior_meshes = tuple(mesh.name for mesh in self._meshes if not mesh.has_tetrahedra)
@@ -490,7 +489,6 @@ class SystemConfigDialog(QDialog):
                 volume_group=(
                     None if volume_mesh is None or not volume_mesh.volume_groups else volume_mesh.volume_groups[0]
                 ),
-                bulk_loss_factor=0.0,
             )
             return
         self._append_region(
@@ -498,7 +496,6 @@ class SystemConfigDialog(QDialog):
             kind=AcousticRegionKind.UNBOUNDED_AIR,
             mesh_name=exterior_meshes,
             volume_group=None,
-            bulk_loss_factor=0.0,
         )
 
     def _restored_region_mesh_name(
@@ -520,7 +517,7 @@ class SystemConfigDialog(QDialog):
         mesh_name: str | tuple[str, ...] | None,
         volume_group: str | None,
         region_id: str | None = None,
-        bulk_loss_factor: float = 0.0,
+        loss_model: dict | None = None,
     ) -> None:
         row = self.regions_table.rowCount()
         self.regions_table.insertRow(row)
@@ -542,23 +539,20 @@ class SystemConfigDialog(QDialog):
 
         volume_combo = QComboBox()
         self.regions_table.setCellWidget(row, 3, volume_combo)
-        loss_combo = QComboBox()
-        for loss_factor in FEM_BULK_LOSS_FACTOR_OPTIONS:
-            loss_combo.addItem(f"{loss_factor:g}", loss_factor)
-        loss_index = loss_combo.findData(float(bulk_loss_factor))
-        if loss_index < 0:
-            loss_combo.addItem(f"{float(bulk_loss_factor):g} (existing)", float(bulk_loss_factor))
-            loss_index = loss_combo.count() - 1
-        loss_combo.setCurrentIndex(loss_index)
-        loss_combo.setToolTip(
-            "Homogeneous FEM bulk loss for this bounded region; approximate isolated-mode Q is 1/loss factor."
+        material_button = QPushButton()
+        material_button.setProperty(
+            "loss_model",
+            dict(loss_model) if loss_model and kind == AcousticRegionKind.BOUNDED_AIR else _LOSSLESS_AIR,
         )
-        loss_combo.setEnabled(kind == AcousticRegionKind.BOUNDED_AIR)
-        self.regions_table.setCellWidget(row, 4, loss_combo)
+        material_button.setToolTip("Air (optionally with a bulk loss factor) or a JCA/JCAL porous material.")
+        material_button.setEnabled(kind == AcousticRegionKind.BOUNDED_AIR)
+        material_button.clicked.connect(lambda _checked=False, button=material_button: self._edit_material(button))
+        self._refresh_material_button(material_button)
+        self.regions_table.setCellWidget(row, 4, material_button)
         type_combo.currentIndexChanged.connect(lambda _index, r=row: self._refresh_region_volume_combo(r))
         type_combo.currentIndexChanged.connect(self._refresh_interfaces_tab_availability)
         type_combo.currentIndexChanged.connect(
-            lambda _index, combo=loss_combo, r=row: combo.setEnabled(
+            lambda _index, combo=material_button, r=row: combo.setEnabled(
                 self._region_kind(r) == AcousticRegionKind.BOUNDED_AIR
             )
         )
@@ -586,7 +580,6 @@ class SystemConfigDialog(QDialog):
             kind=AcousticRegionKind.BOUNDED_AIR,
             mesh_name=None if volume_mesh is None else volume_mesh.name,
             volume_group=None if volume_mesh is None or not volume_mesh.volume_groups else volume_mesh.volume_groups[0],
-            bulk_loss_factor=0.0,
         )
 
     def _remove_selected_regions(self) -> None:
@@ -777,6 +770,25 @@ class SystemConfigDialog(QDialog):
         if combo.currentData() != "off":
             parameters[BOUNDARY_THERMOVISCOUS_LOSS_KEY] = combo.currentData()
         button.setProperty("boundary_parameters", parameters)
+
+    @staticmethod
+    def _refresh_material_button(button: QPushButton) -> None:
+        button.setText(region_material_label(dict(button.property("loss_model") or {})))
+
+    def _edit_material(self, button: QPushButton) -> None:
+        row = next(
+            (r for r in range(self.regions_table.rowCount()) if self.regions_table.cellWidget(r, 4) is button), None
+        )
+        name_edit = None if row is None else self.regions_table.cellWidget(row, 0)
+        dialog = RegionMaterialDialog(
+            dict(button.property("loss_model") or {}),
+            self,
+            region_name=name_edit.text().strip() if isinstance(name_edit, QLineEdit) else "region",
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        button.setProperty("loss_model", dialog.loss_model())
+        self._refresh_material_button(button)
 
     @staticmethod
     def _refresh_wall_impedance_button(button: QPushButton, assignment: QComboBox, bounded: bool) -> None:
@@ -1701,7 +1713,7 @@ class SystemConfigDialog(QDialog):
             name_edit = self.regions_table.cellWidget(row, 0)
             mesh_combo = self.regions_table.cellWidget(row, 2)
             volume_combo = self.regions_table.cellWidget(row, 3)
-            loss_combo = self.regions_table.cellWidget(row, 4)
+            material_button = self.regions_table.cellWidget(row, 4)
             if not isinstance(name_edit, QLineEdit) or not isinstance(mesh_combo, _RegionMeshCombo):
                 continue
             name = name_edit.text().strip()
@@ -1731,10 +1743,10 @@ class SystemConfigDialog(QDialog):
                     "mesh_names": mesh_names,
                     "mesh_ids": tuple(resource_ids[mesh_name] for mesh_name in mesh_names),
                     "volume_group": None if volume_group is None else str(volume_group),
-                    "bulk_loss_factor": (
-                        float(loss_combo.currentData())
-                        if kind == AcousticRegionKind.BOUNDED_AIR and isinstance(loss_combo, QComboBox)
-                        else 0.0
+                    "loss_model": (
+                        _bounded_region_loss_model(material_button.property("loss_model"))
+                        if kind == AcousticRegionKind.BOUNDED_AIR and isinstance(material_button, QPushButton)
+                        else {}
                     ),
                 }
             )
@@ -1815,13 +1827,7 @@ class SystemConfigDialog(QDialog):
                     ),
                     sound_speed_m_per_s=343.0 if existing is None else existing.sound_speed_m_per_s,
                     density_kg_per_m3=1.21 if existing is None else existing.density_kg_per_m3,
-                    loss_model=(
-                        {}
-                        if draft["kind"] == AcousticRegionKind.UNBOUNDED_AIR
-                        else {
-                            REGION_BULK_LOSS_FACTOR_KEY: draft["bulk_loss_factor"],
-                        }
-                    ),
+                    loss_model=draft["loss_model"],
                 )
             )
         return tuple(regions), tuple(resource_by_name.values())
@@ -1898,6 +1904,15 @@ class SystemConfigDialog(QDialog):
     def _accept(self) -> None:
         if self.apply():
             self.accept()
+
+
+_LOSSLESS_AIR = {REGION_BULK_LOSS_FACTOR_KEY: 0.0}
+
+
+def _bounded_region_loss_model(raw) -> dict:
+    """A bounded region's stored loss model; an empty one is written as lossless legacy Air, as before."""
+
+    return dict(raw) if isinstance(raw, dict) and raw else dict(_LOSSLESS_AIR)
 
 
 def _unique_id(base: str, used: set[str]) -> str:

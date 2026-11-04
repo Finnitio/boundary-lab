@@ -35,7 +35,8 @@ def test_project_file_round_trip(tmp_path) -> None:
         imported_meshes=[
             {
                 "name": "enclosure",
-                "source_file": "C:/meshes/enclosure.msh",
+                # An absolute path outside the project on every platform ("C:/meshes/..." on Windows).
+                "source_file": (Path(tmp_path.anchor) / "meshes" / "enclosure.msh").as_posix(),
                 "cleaned_file": None,
                 "translation_mm": [0, 10, 0],
                 "enabled": True,

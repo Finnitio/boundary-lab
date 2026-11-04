@@ -2,12 +2,78 @@
 
 from __future__ import annotations
 
+import cmath
+import json
 import math
+from dataclasses import dataclass
+from importlib import resources
 from typing import Any, Mapping
 
+from blab.physical_model import AcousticRegionKind, ValidationWarning
+
 REGION_BULK_LOSS_FACTOR_KEY = "bulk_loss_factor"
+REGION_MATERIAL_MODEL_KEY = "model"
+REGION_MATERIAL_FRAME_KEY = "frame"
+REGION_MATERIAL_PRESET_KEY = "preset"
+MATERIAL_PRESET_CUSTOM = "custom"
+MATERIAL_MODEL_AIR = "air"
+MATERIAL_MODEL_JCA = "jca"
+MATERIAL_MODEL_JCAL = "jcal"
+MATERIAL_FRAME_RIGID = "rigid"
+MATERIAL_FRAME_LIMP = "limp"
+# Display names of the material models, shared by messages, assumptions and the Material dialog.
+MATERIAL_MODEL_LABELS = {MATERIAL_MODEL_AIR: "Air", MATERIAL_MODEL_JCA: "JCA", MATERIAL_MODEL_JCAL: "JCAL"}
+
+
+@dataclass(frozen=True)
+class MaterialParameter:
+    """Valid range of one SI material parameter: ``low < value`` (or ``<=``) and ``value <= high``."""
+
+    label: str
+    low: float
+    low_inclusive: bool = False
+    high: float | None = None
+
+    def accepts(self, value: float) -> bool:
+        above = value >= self.low if self.low_inclusive else value > self.low
+        return math.isfinite(value) and above and (self.high is None or value <= self.high)
+
+    def describe(self) -> str:
+        bound = f"{'>=' if self.low_inclusive else '>'} {self.low:g}"
+        return bound if self.high is None else f"{bound} and <= {self.high:g}"
+
+
+# Region materials mirror the BEAT Engine region ``loss_model`` wire contract
+# (``beat_contract.REGION_MATERIAL_MODELS``/``REGION_MATERIAL_FRAMES``/``_POROUS_PARAMETERS``):
+# each model lists the keys it accepts besides ``model`` (and ``frame``), and each frame of
+# a porous model lists the parameters it adds. A loss model without ``model`` is legacy Air.
+POROUS_MATERIAL_PARAMETERS: dict[str, MaterialParameter] = {
+    "porosity": MaterialParameter("porosity", 0.0, high=1.0),
+    "flow_resistivity_pa_s_per_m2": MaterialParameter("flow resistivity", 0.0),
+    "tortuosity": MaterialParameter("tortuosity", 1.0, low_inclusive=True),
+    "viscous_characteristic_length_m": MaterialParameter("viscous characteristic length", 0.0),
+    "thermal_characteristic_length_m": MaterialParameter("thermal characteristic length", 0.0),
+    "static_thermal_permeability_m2": MaterialParameter("static thermal permeability", 0.0),
+    "frame_density_kg_per_m3": MaterialParameter("frame density", 0.0),
+}
+_JCA_PARAMETERS = (
+    "porosity",
+    "flow_resistivity_pa_s_per_m2",
+    "tortuosity",
+    "viscous_characteristic_length_m",
+    "thermal_characteristic_length_m",
+)
+REGION_MATERIAL_MODELS: dict[str, tuple[str, ...]] = {
+    MATERIAL_MODEL_AIR: (REGION_BULK_LOSS_FACTOR_KEY,),
+    MATERIAL_MODEL_JCA: _JCA_PARAMETERS,
+    MATERIAL_MODEL_JCAL: (*_JCA_PARAMETERS, "static_thermal_permeability_m2"),
+}
+REGION_MATERIAL_FRAMES: dict[str, tuple[str, ...]] = {
+    MATERIAL_FRAME_RIGID: (),
+    MATERIAL_FRAME_LIMP: ("frame_density_kg_per_m3",),
+}
+POROUS_MATERIAL_MODELS = frozenset(set(REGION_MATERIAL_MODELS) - {MATERIAL_MODEL_AIR})
 BOUNDARY_THERMOVISCOUS_LOSS_KEY = "thermoviscous_wall_losses"
-FEM_BULK_LOSS_FACTOR_OPTIONS = (0.0, 0.002, 0.005, 0.01, 0.02, 0.05)
 WALL_IMPEDANCE_KEY = "wall_impedance"
 WALL_IMPEDANCE_MODEL_MIKI = "miki"
 
@@ -23,15 +89,324 @@ def boundary_thermoviscous_wall_losses(parameters: Mapping[str, Any] | None) -> 
     return model
 
 
+@dataclass(frozen=True)
+class Material:
+    """Normalized acoustic material of a region, keyed like the engine wire contract.
+
+    Air carries only ``bulk_loss_factor``; a porous model carries its ``frame`` and its
+    SI ``parameters`` as ``(wire key, value)`` pairs in table order.
+    """
+
+    model: str = MATERIAL_MODEL_AIR
+    bulk_loss_factor: float = 0.0
+    frame: str | None = None
+    parameters: tuple[tuple[str, float], ...] = ()
+    preset: str | None = None
+    """Porous only: the Material preset id the parameters still equal, or ``"custom"``."""
+
+    @property
+    def is_porous(self) -> bool:
+        return self.model in POROUS_MATERIAL_MODELS
+
+    def to_loss_model(self) -> dict[str, Any]:
+        """Return the normalized engine ``loss_model`` (explicit model, SI floats, no preset name)."""
+
+        if not self.is_porous:
+            return {REGION_MATERIAL_MODEL_KEY: self.model, REGION_BULK_LOSS_FACTOR_KEY: self.bulk_loss_factor}
+        return {REGION_MATERIAL_MODEL_KEY: self.model, REGION_MATERIAL_FRAME_KEY: self.frame, **dict(self.parameters)}
+
+    def to_project_loss_model(self) -> dict[str, Any]:
+        """Return the project ``loss_model``: the engine form plus, for porous models, the preset name."""
+
+        loss_model = self.to_loss_model()
+        if self.is_porous:
+            loss_model[REGION_MATERIAL_PRESET_KEY] = self.preset or MATERIAL_PRESET_CUSTOM
+        return loss_model
+
+
+@dataclass(frozen=True)
+class MaterialPreset:
+    """A named porous parameter set from the built-in library, in SI.
+
+    ``parameters`` holds the JCA parameters and the limp frame density; JCAL derives its
+    static thermal permeability from them (no preset carries a measured value).
+    """
+
+    id: str
+    name: str
+    source: str
+    parameters: dict[str, float]
+
+    def loss_model(self, *, model: str, frame: str) -> dict[str, Any]:
+        """Return the project loss model of this preset for a porous ``model`` and ``frame``."""
+
+        if model not in POROUS_MATERIAL_MODELS or frame not in REGION_MATERIAL_FRAMES:
+            raise ValueError(f"Material presets describe porous models, not {model!r} with frame {frame!r}.")
+        values = dict(self.parameters)
+        values["static_thermal_permeability_m2"] = jcal_static_thermal_permeability(
+            porosity=values["porosity"], thermal_characteristic_length_m=values["thermal_characteristic_length_m"]
+        )
+        keys = (*REGION_MATERIAL_MODELS[model], *REGION_MATERIAL_FRAMES[frame])
+        return {
+            REGION_MATERIAL_MODEL_KEY: model,
+            REGION_MATERIAL_FRAME_KEY: frame,
+            **{key: values[key] for key in keys},
+            REGION_MATERIAL_PRESET_KEY: self.id,
+        }
+
+    def matches(self, model: str, frame: str, parameters: Mapping[str, float]) -> bool:
+        """Whether every parameter of a porous material equals this preset's value for that model and frame."""
+
+        expected = self.loss_model(model=model, frame=frame)
+        return set(parameters) == set(expected) - {
+            REGION_MATERIAL_MODEL_KEY,
+            REGION_MATERIAL_FRAME_KEY,
+            REGION_MATERIAL_PRESET_KEY,
+        } and all(
+            math.isclose(value, expected[key], rel_tol=_PRESET_RELATIVE_TOLERANCE) for key, value in parameters.items()
+        )
+
+
+_PRESET_RELATIVE_TOLERANCE = 1e-9
+_PRESET_FILE_KEYS = {
+    "porosity": ("porosity", 1.0),
+    "flow_resistivity": ("flow_resistivity_pa_s_per_m2", 1.0),
+    "tortuosity": ("tortuosity", 1.0),
+    "viscous_characteristic_length": ("viscous_characteristic_length_m", 1e6),
+    "thermal_characteristic_length": ("thermal_characteristic_length_m", 1e6),
+    "frame_density": ("frame_density_kg_per_m3", 1.0),
+}
+
+
+def _load_material_presets() -> tuple[MaterialPreset, ...]:
+    """Read the preset library (literature units) and convert it to SI; divisors keep µm values exact."""
+
+    raw = json.loads(resources.files("blab").joinpath("material_presets.json").read_text(encoding="utf-8"))
+    return tuple(
+        MaterialPreset(
+            id=item["id"],
+            name=item["name"],
+            source=f"{raw['reference']}, {item['table']}",
+            parameters={key: float(item[file_key]) / divisor for file_key, (key, divisor) in _PRESET_FILE_KEYS.items()},
+        )
+        for item in raw["presets"]
+    )
+
+
+MATERIAL_PRESETS: tuple[MaterialPreset, ...] = _load_material_presets()
+_PRESETS_BY_ID = {preset.id: preset for preset in MATERIAL_PRESETS}
+
+
+def material_preset(preset_id: str) -> MaterialPreset | None:
+    """Return the built-in Material preset with this id, or ``None`` (``"custom"`` or unknown)."""
+
+    return _PRESETS_BY_ID.get(preset_id)
+
+
+def preset_loss_model(preset_id: str, *, model: str, frame: str) -> dict[str, Any]:
+    """Return the project loss model that fills every parameter of ``model``/``frame`` from a preset."""
+
+    preset = material_preset(preset_id)
+    if preset is None:
+        raise ValueError(f"Unknown material preset {preset_id!r}.")
+    return preset.loss_model(model=model, frame=frame)
+
+
+def jcal_static_thermal_permeability(*, porosity: float, thermal_characteristic_length_m: float) -> float:
+    """Return k0' = phi * Lambda'^2 / 8, the value for which JCAL equals JCA (book Eqs. 5.54/5.55)."""
+
+    return porosity * thermal_characteristic_length_m**2 / 8.0
+
+
+class MaterialError(ValueError):
+    """A region loss model that does not describe a valid Material."""
+
+    def __init__(self, issues: tuple[str, ...]) -> None:
+        super().__init__(" ".join(issues))
+        self.issues = issues
+
+
+def region_material(loss_model: Mapping[str, Any] | None, *, region_id: str, bounded: bool) -> Material:
+    """Normalize a region loss model into a Material or raise every validation issue.
+
+    ``bounded`` is whether the region is bounded air, the only kind that may be lossy or porous.
+    """
+
+    owner = f"Region '{region_id}'"
+    loss_model = loss_model or {}
+    model = loss_model.get(REGION_MATERIAL_MODEL_KEY, MATERIAL_MODEL_AIR)
+    if not isinstance(model, str) or model not in REGION_MATERIAL_MODELS:
+        raise MaterialError(
+            (
+                f"{owner} uses unsupported material model {model!r}; expected one of: "
+                + ", ".join(sorted(REGION_MATERIAL_MODELS))
+                + ".",
+            )
+        )
+    if model in POROUS_MATERIAL_MODELS:
+        return _porous_material(loss_model, model, owner=owner, bounded=bounded)
+    issues: list[str] = []
+    unknown = sorted(set(loss_model) - {REGION_MATERIAL_MODEL_KEY, *REGION_MATERIAL_MODELS[model]})
+    if unknown:
+        issues.append(f"{owner} uses unsupported loss parameters: " + ", ".join(unknown) + ".")
+    bulk_loss_factor = _bulk_loss_factor(loss_model.get(REGION_BULK_LOSS_FACTOR_KEY, 0.0))
+    if bulk_loss_factor is None:
+        issues.append(f"{owner} FEM bulk loss factor must be a finite number between 0 and 1.")
+    elif bulk_loss_factor != 0.0 and not bounded:
+        issues.append(f"{owner} FEM bulk loss requires a bounded-air region.")
+    if issues:
+        raise MaterialError(tuple(issues))
+    return Material(model=model, bulk_loss_factor=bulk_loss_factor)
+
+
+def material_of_region(region: Any) -> Material:
+    """Return the Material of an ``AcousticRegion`` or ``CompiledRegion`` (``MaterialError`` if invalid)."""
+
+    return region_material(
+        region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
+    )
+
+
+def _porous_material(loss_model: Mapping[str, Any], model: str, *, owner: str, bounded: bool) -> Material:
+    issues: list[str] = []
+    if not bounded:
+        issues.append(f"{owner} porous material {model!r} requires a bounded-air region.")
+    frame = loss_model.get(REGION_MATERIAL_FRAME_KEY)
+    if not isinstance(frame, str) or frame not in REGION_MATERIAL_FRAMES:
+        issues.append(
+            f"{owner} uses unsupported {MATERIAL_MODEL_LABELS[model]} frame {frame!r}; expected one of: "
+            + ", ".join(sorted(REGION_MATERIAL_FRAMES))
+            + "."
+        )
+        frame_keys: tuple[str, ...] = ()
+    else:
+        frame_keys = REGION_MATERIAL_FRAMES[frame]
+    keys = (*REGION_MATERIAL_MODELS[model], *frame_keys)
+    if REGION_BULK_LOSS_FACTOR_KEY in loss_model:
+        issues.append(f"{owner} FEM bulk loss factor is only available for Air, not {MATERIAL_MODEL_LABELS[model]}.")
+    preset_id = loss_model.get(REGION_MATERIAL_PRESET_KEY, MATERIAL_PRESET_CUSTOM)
+    if not isinstance(preset_id, str):
+        issues.append(f"{owner} material preset must be a preset name or '{MATERIAL_PRESET_CUSTOM}'.")
+    known = {
+        REGION_MATERIAL_MODEL_KEY,
+        REGION_MATERIAL_FRAME_KEY,
+        REGION_MATERIAL_PRESET_KEY,
+        REGION_BULK_LOSS_FACTOR_KEY,
+        *keys,
+    }
+    unknown = sorted(set(loss_model) - known)
+    if unknown:
+        issues.append(
+            f"{owner} uses unsupported {MATERIAL_MODEL_LABELS[model]} parameters: " + ", ".join(unknown) + "."
+        )
+    parameters: list[tuple[str, float]] = []
+    for key in keys:
+        spec = POROUS_MATERIAL_PARAMETERS[key]
+        if key not in loss_model:
+            issues.append(f"{owner} {MATERIAL_MODEL_LABELS[model]} material is missing {spec.label} ({key}).")
+            continue
+        value = _finite_number(loss_model[key])
+        if value is None or not spec.accepts(value):
+            issues.append(
+                f"{owner} {MATERIAL_MODEL_LABELS[model]} {spec.label} ({key}) must be a finite number {spec.describe()}."
+            )
+            continue
+        parameters.append((key, value))
+    if issues:
+        raise MaterialError(tuple(issues))
+    preset = material_preset(preset_id)
+    if preset is None or not preset.matches(model, frame, dict(parameters)):
+        preset_id = MATERIAL_PRESET_CUSTOM
+    return Material(model=model, frame=frame, parameters=tuple(parameters), preset=preset_id)
+
+
+def region_material_warnings(material: Material, *, region_id: str) -> tuple[ValidationWarning, ...]:
+    """Return the findings that make a valid Material suspicious without rejecting it."""
+
+    parameters = dict(material.parameters)
+    viscous = parameters.get("viscous_characteristic_length_m")
+    thermal = parameters.get("thermal_characteristic_length_m")
+    if viscous is None or thermal is None or thermal >= viscous:
+        return ()
+    return (
+        ValidationWarning(
+            code="porous_thermal_length_below_viscous_length",
+            region_id=region_id,
+            message=f"Region '{region_id}' {MATERIAL_MODEL_LABELS[material.model]} thermal characteristic length "
+            f"({thermal * 1e6:g} um) is smaller than its viscous characteristic length ({viscous * 1e6:g} um); "
+            "measured data usually has thermal >= viscous. Check the values.",
+        ),
+    )
+
+
+# Air constants of the BEAT Engine porous and thermoviscous models (``THERMOVISCOUS_AIR``).
+AIR_DYNAMIC_VISCOSITY_PA_S = 1.84e-5
+AIR_THERMAL_CONDUCTIVITY_W_PER_M_K = 0.0257
+AIR_SPECIFIC_HEAT_J_PER_KG_K = 1005.0
+AIR_HEAT_CAPACITY_RATIO = 1.4
+
+
+def porous_wavelength_m(
+    material: Material, frequency_hz: float, *, density_kg_per_m3: float, sound_speed_m_per_s: float
+) -> float:
+    """Return the porous wavelength 2 pi / Re(k_eq), k_eq = omega sqrt(rho_eq / K_eq), of a porous Material.
+
+    Evaluates the engine's JCAL equivalent fluid (JCA with k0' = phi Lambda'^2 / 8, limp frame by
+    Panneton's density) as documented in BEAT Engine ``docs/Porous Materials.md`` (Equivalent fluid);
+    ``density_kg_per_m3``/``sound_speed_m_per_s`` are the region's air.
+    """
+
+    if not material.is_porous:
+        raise ValueError("A porous wavelength needs a porous material.")
+    parameters = dict(material.parameters)
+    rho0 = float(density_kg_per_m3)
+    omega = 2.0 * math.pi * float(frequency_hz)
+    jw = 1j * omega
+    eta, gamma = AIR_DYNAMIC_VISCOSITY_PA_S, AIR_HEAT_CAPACITY_RATIO
+    prandtl = eta * AIR_SPECIFIC_HEAT_J_PER_KG_K / AIR_THERMAL_CONDUCTIVITY_W_PER_M_K
+    phi = parameters["porosity"]
+    alpha = parameters["tortuosity"]
+    viscous_length = parameters["viscous_characteristic_length_m"]
+    thermal_length = parameters["thermal_characteristic_length_m"]
+    k0_thermal = parameters.get(
+        "static_thermal_permeability_m2",
+        jcal_static_thermal_permeability(porosity=phi, thermal_characteristic_length_m=thermal_length),
+    )
+    nu = eta / rho0
+    q0 = eta / parameters["flow_resistivity_pa_s_per_m2"]
+    g = cmath.sqrt(1.0 + (2.0 * alpha * q0 / (phi * viscous_length)) ** 2 * jw / nu)
+    rho = rho0 * (alpha + nu * phi / (jw * q0) * g)
+    nu_thermal = nu / prandtl
+    g_thermal = cmath.sqrt(1.0 + (2.0 * k0_thermal / (phi * thermal_length)) ** 2 * jw / nu_thermal)
+    bulk_air = rho0 * float(sound_speed_m_per_s) ** 2  # gamma P0
+    bulk = bulk_air / (gamma - (gamma - 1.0) / (1.0 + nu_thermal * phi / (jw * k0_thermal) * g_thermal))
+    rho_eq, bulk_eq = rho / phi, bulk / phi
+    if material.frame == MATERIAL_FRAME_LIMP:
+        total = parameters["frame_density_kg_per_m3"] + phi * rho0
+        rho_eq = (total * rho_eq - rho0**2) / (total + rho_eq - 2.0 * rho0)
+    return 2.0 * math.pi / (omega * cmath.sqrt(rho_eq / bulk_eq)).real
+
+
+def _finite_number(raw: Any) -> float | None:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    value = float(raw)
+    return value if math.isfinite(value) else None
+
+
+def _bulk_loss_factor(raw: Any) -> float | None:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) and 0.0 <= value <= 1.0 else None
+
+
 def region_bulk_loss_factor(loss_model: Mapping[str, Any] | None) -> float:
     """Return and validate a bounded-region bulk loss factor."""
 
-    raw = 0.0 if not loss_model else loss_model.get(REGION_BULK_LOSS_FACTOR_KEY, 0.0)
-    try:
-        value = float(raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Region FEM bulk loss factor must be a finite number between 0 and 1.") from exc
-    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+    value = _bulk_loss_factor(0.0 if not loss_model else loss_model.get(REGION_BULK_LOSS_FACTOR_KEY, 0.0))
+    if value is None:
         raise ValueError("Region FEM bulk loss factor must be a finite number between 0 and 1.")
     return value
 

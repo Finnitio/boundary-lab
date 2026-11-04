@@ -150,3 +150,58 @@ def test_compression_driver_sparse_interior_fem_integration() -> None:
     assert result.diagnostics["formulation"] == "interior_fem_sparse"
     assert result.diagnostics["plane_wave_termination_boundary_ids"] == ["boundary:front-termination"]
     assert result.diagnostics["relative_residual"] < 1e-8
+
+
+@pytest.mark.parametrize(
+    ("loss_model", "message"),
+    (
+        ({"model": "biot"}, "uses unsupported material model 'biot'"),
+        ({"bulk_loss_factor": 0.002, "porosity": 0.98}, "uses unsupported loss parameters: porosity"),
+        ({"bulk_loss_factor": 2.0}, "FEM bulk loss factor must be a finite number between 0 and 1"),
+    ),
+)
+def test_interior_fem_rejects_invalid_region_materials_before_starting_julia(loss_model, message) -> None:
+    _project, prepared = _prepared()
+    system = prepared.request.compiled_system
+    region_id = system.regions[0].id
+    request = replace(
+        prepared.request,
+        compiled_system=replace(
+            system,
+            regions=tuple(
+                replace(region, loss_model=loss_model) if region.id == region_id else region
+                for region in system.regions
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match=f"Region '{region_id}' {message}"):
+        validate_system_capabilities(request)
+
+
+def test_compiler_rejects_plane_wave_termination_on_porous_region() -> None:
+    project, _prepared_solve = _prepared()
+    system = project.physical_system
+    jca = {
+        "model": "jca",
+        "frame": "rigid",
+        "porosity": 0.98,
+        "flow_resistivity_pa_s_per_m2": 25_000.0,
+        "tortuosity": 1.02,
+        "viscous_characteristic_length_m": 90e-6,
+        "thermal_characteristic_length_m": 180e-6,
+    }
+    porous = replace(
+        system,
+        regions=tuple(
+            replace(region, loss_model=jca) if region.id == "region:front" else region for region in system.regions
+        ),
+    )
+
+    with pytest.raises(PhysicalModelCompileError) as caught:
+        PhysicalSystemCompiler().compile(porous)
+
+    assert caught.value.issues == (
+        "Boundary 'boundary:front-termination' cannot use a plane-wave tube termination on porous region "
+        "'region:front' (JCA); porous regions allow rigid, moving and interface boundaries without wall treatments.",
+    )

@@ -65,7 +65,9 @@ system:
   volume;
 - rigid boundaries everywhere else except configured interface boundaries;
 - linear pressure acoustics, with optional homogeneous bulk loss in every
-  bounded FEM air volume;
+  bounded FEM air volume, or a JCA/JCAL porous equivalent-fluid material per
+  bounded region (CPU and CUDA backends; see
+  [Model Assumptions](Model%20Assumptions.md#porous-region-materials));
 - `off`, `x`, or `xy` symmetry, with explicit completion/orbit semantics for
   electrodynamic components.
 
@@ -120,8 +122,9 @@ derivative. Differing fluids are rejected.
 5. In **Components**, attach prescribed-velocity or electrodynamic components
    to the appropriate moving boundaries, enter any relative surface-velocity
    offsets and transducer parameters, and assign application channels.
-6. Set **FEM Bulk Loss Factor** on any bounded region that requires volume
-   damping, and optionally configure **Wall Impedance** on bounded rigid
+6. Set the **Material** of any bounded region that requires volume damping
+   (Air with a bulk loss factor, or a porous JCA/JCAL fill), and optionally
+   configure **Wall Impedance** on bounded rigid
    surfaces. Select **BEAT Engine (CPU)**, **BEAT Engine (Nvidia CUDA)**, or
    **BEAT Engine (AMD ROCm)** in Preferences, then choose full, X-half, or
    XY-quarter symmetry in **Meshes**.
@@ -196,9 +199,9 @@ A_F = K-k^2M+i k^2M_\eta, \qquad k=\frac{\omega}{c},
 $$
 
 where \(M_\eta\) is the consistent FEM mass matrix weighted by the loss factor
-of each bounded region. **FEM Bulk Loss Factor** is configured per region in
-the System window using the presets `0`, `0.002`, `0.005`, `0.01`, `0.02`, and
-`0.05`. `0` reproduces the lossless formulation. With the solver's
+of each bounded region. The FEM bulk loss factor is set per Air region in the
+System window's Material dialog, as a value from 0 to 1. `0` reproduces the
+lossless formulation. With the solver's
 \(\exp(+i\omega t)\) convention, the positive imaginary mass term is passive.
 Near an isolated lightly damped cavity mode, \(Q\) is approximately
 \(1/\eta\).
@@ -207,6 +210,15 @@ This remains a deliberately simple frequency-independent volume-loss
 approximation. It does not damp the exterior BEM domain or reproduce
 frequency-dependent thermoviscous boundary-layer losses. The region values
 used by a solve are included in its result diagnostics.
+
+A porous region r replaces its elements' contribution with the
+frequency-dependent equivalent-fluid terms
+\((\rho_0/\rho_{eq})K_r-\omega^2(\rho_0/K_{eq})M_r\) on the same sparsity
+pattern. Moving-boundary and interface terms keep their form, because the
+interface flux of a porous region is defined through \(\rho_{eq}\). See
+[Model Assumptions](Model%20Assumptions.md#porous-region-materials) and the BEAT
+Engine [Porous materials](https://github.com/JWSound/BEAT_Engine/blob/main/docs/Porous%20Materials.md)
+page.
 
 Rigid surfaces of a bounded region may also carry a rigid-backed porous wall
 treatment. For layer thickness \(d\), airflow resistivity \(\sigma\), and
@@ -642,7 +654,9 @@ rejected during application preparation or backend validation:
 - general impedance boundary kinds or arbitrary impedance functions (the Miki
   rigid-backed treatment on bounded rigid walls is supported);
 - spatially varying acoustic material loss within one FEM region (one
-  homogeneous bulk-loss factor per bounded region is supported);
+  homogeneous Material per bounded region is supported);
+- porous regions on the ROCm and Metal backends, and on those backends region
+  seams between regions with different FEM bulk loss factors;
 - `Mms` input or automatic conversion from conventional T/S parameter sets;
 - passive radiators;
 - nonideal amplifier/source impedance;

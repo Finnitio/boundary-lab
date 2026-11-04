@@ -1,4 +1,5 @@
 import json
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,8 +25,9 @@ from blab.physical_model import (
 )
 from blab.project.model import ProjectPreferencesState
 from blab.project_cli import _build_arg_parser
+from blab.project_cli import main as project_main
 from blab.solve_results import ResultDomain
-from blab.solvers.coupled_backend import validate_solve_plan
+from blab.solvers.coupled_backend import PhysicalSystemProductionBackend, validate_solve_plan
 from blab.system_contract import OutputRequest, QuantityResult, SystemFrequencyResult, SystemSolveRequest
 from blab.system_solve import PreparedSystemSolve, canonicalize_observation_result
 
@@ -259,7 +261,7 @@ def test_headless_full_matrix_diagnostics_disable_default_condensation(monkeypat
     )
     monkeypatch.setattr(headless_module, "prepare_system_solve", lambda *_args, **_kwargs: prepared)
     validated = []
-    monkeypatch.setattr(headless_module, "validate_solve_plan", validated.append)
+    monkeypatch.setattr(headless_module, "validate_solve_plan", lambda request, **_: validated.append(request))
     project_path = tmp_path / "project.blab.json"
     project_path.write_text("{}", encoding="utf-8")
     project = HeadlessProject(
@@ -410,3 +412,208 @@ def test_interface_radiation_is_an_explicitly_retainable_project_observation(tmp
     prepared = _prepared_request()
     with pytest.raises(ValueError, match="FEM-BEM interfaces"):
         validate_solve_plan(replace(prepared.request, outputs=(output,)))
+
+
+FILLED_TUBE = Path(__file__).parents[1] / "examples" / "filled_tube" / "filled_tube.blab.json"
+FILLED_TUBE_MATERIAL = {
+    "model": "jca",
+    "frame": "rigid",
+    "porosity": 0.98,
+    "flow_resistivity_pa_s_per_m2": 25_000.0,
+    "tortuosity": 1.02,
+    "viscous_characteristic_length_m": 90e-6,
+    "thermal_characteristic_length_m": 180e-6,
+}
+
+
+def test_validation_and_run_provenance_record_each_region_material(tmp_path: Path) -> None:
+    project = headless_module.load_headless_project(FILLED_TUBE)
+    prepared = prepare_headless_solve(project, load_headless_solve_spec(None), backend_id="beat_cpu")
+    expected = [
+        {"region_id": "region:fill", "name": "Porous fill", "kind": "bounded_air", "material": FILLED_TUBE_MATERIAL}
+    ]
+
+    summary = headless_module.validation_summary(project, prepared, backend_id="beat_cpu")
+    HeadlessResultWriter(
+        tmp_path / "run", project=project, prepared=prepared, backend_id="beat_cpu", public_request={}
+    ).finish(status="complete")
+    manifest = json.loads((tmp_path / "run" / "manifest.json").read_text(encoding="utf-8"))
+
+    assert summary["region_materials"] == expected
+    assert manifest["region_materials"] == expected
+
+
+def test_validate_json_reports_material_warnings_per_region(tmp_path: Path, capsys) -> None:
+    project = json.loads(FILLED_TUBE.read_text(encoding="utf-8"))
+    project["physical_system"]["regions"][0]["loss_model"]["thermal_characteristic_length_m"] = 60e-6
+    shutil.copy(FILLED_TUBE.with_suffix("").with_suffix(".msh"), tmp_path)
+    path = tmp_path / FILLED_TUBE.name
+    path.write_text(json.dumps(project), encoding="utf-8")
+
+    capsys.readouterr()
+    project_main(["validate", str(path), "--backend", "beat_cpu", "--json"], prog="blab project")
+    summary = json.loads(capsys.readouterr().out)
+
+    assert summary["valid"]
+    assert [(item["code"], item["region_id"]) for item in summary["warnings"]] == [
+        ("porous_thermal_length_below_viscous_length", "region:fill")
+    ]
+
+
+def test_run_manifest_records_the_validation_warnings_the_run_was_made_despite(tmp_path: Path) -> None:
+    payload = json.loads(FILLED_TUBE.read_text(encoding="utf-8"))
+    payload["physical_system"]["regions"][0]["loss_model"]["thermal_characteristic_length_m"] = 60e-6
+    shutil.copy(FILLED_TUBE.with_suffix("").with_suffix(".msh"), tmp_path)
+    path = tmp_path / FILLED_TUBE.name
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    project = headless_module.load_headless_project(path)
+    prepared = prepare_headless_solve(project, load_headless_solve_spec(None), backend_id="beat_cpu")
+
+    HeadlessResultWriter(
+        tmp_path / "run", project=project, prepared=prepared, backend_id="beat_cpu", public_request={}
+    ).finish(status="complete")
+    manifest = json.loads((tmp_path / "run" / "manifest.json").read_text(encoding="utf-8"))
+
+    (warning,) = manifest["warnings"]
+    assert (warning["code"], warning["region_id"]) == ("porous_thermal_length_below_viscous_length", "region:fill")
+    assert "thermal characteristic length (60 um)" in warning["message"]
+
+
+def test_plain_text_validate_prints_each_warning(tmp_path: Path, capsys) -> None:
+    payload = json.loads(FILLED_TUBE.read_text(encoding="utf-8"))
+    payload["physical_system"]["regions"][0]["loss_model"]["thermal_characteristic_length_m"] = 60e-6
+    shutil.copy(FILLED_TUBE.with_suffix("").with_suffix(".msh"), tmp_path)
+    path = tmp_path / FILLED_TUBE.name
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    capsys.readouterr()
+    project_main(["validate", str(path), "--backend", "beat_cpu"], prog="blab project")
+    lines = capsys.readouterr().out.splitlines()
+
+    assert any(line.startswith("Valid ") for line in lines)
+    (warning,) = [line for line in lines if line.startswith("warning:")]
+    assert "porous_thermal_length_below_viscous_length" in warning and "Region 'region:fill'" in warning
+
+
+def test_validate_json_lists_no_warnings_for_a_regular_material(capsys) -> None:
+    capsys.readouterr()
+    project_main(["validate", str(FILLED_TUBE), "--backend", "beat_cpu", "--json"], prog="blab project")
+
+    assert json.loads(capsys.readouterr().out)["warnings"] == []
+
+
+SIMPLE_SEALED = Path(__file__).parents[1] / "examples" / "Simple_Sealed"
+
+
+def _porous_simple_sealed(tmp_path: Path) -> Path:
+    """Copy the coupled Simple_Sealed example with its bounded region filled with a JCA material."""
+
+    for name in ("simple_sealed.blab.json", "Exterior.msh", "interior.msh"):
+        (tmp_path / name).write_bytes((SIMPLE_SEALED / name).read_bytes())
+    path = tmp_path / "simple_sealed.blab.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for region in payload["physical_system"]["regions"]:
+        if region["kind"] == "bounded_air":
+            region["loss_model"] = dict(FILLED_TUBE_MATERIAL)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("backend", ["rocm", "metal"])
+def test_solve_plan_rejects_coupled_porous_regions_on_backends_without_region_materials(
+    tmp_path: Path, backend: str
+) -> None:
+    project = headless_module.load_headless_project(_porous_simple_sealed(tmp_path))
+    prepared = prepare_headless_solve(project, load_headless_solve_spec(None), backend_id="beat_cpu")
+
+    with pytest.raises(
+        ValueError, match=rf"not supported on the {backend} backend.*region:interior-air-1.*cpu or cuda"
+    ):
+        validate_solve_plan(prepared.request, bem_backend=backend)
+
+
+@pytest.mark.parametrize("backend", ["cpu", "cuda"])
+def test_solve_plan_accepts_coupled_porous_regions_on_cpu_and_cuda(tmp_path: Path, backend: str) -> None:
+    project = headless_module.load_headless_project(_porous_simple_sealed(tmp_path))
+    prepared = prepare_headless_solve(project, load_headless_solve_spec(None), backend_id="beat_cpu")
+
+    validate_solve_plan(prepared.request, bem_backend=backend)
+
+
+def test_project_validate_reports_porous_rejection_for_the_requested_backend(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from blab.project_cli import main as project_main
+
+    monkeypatch.setattr(headless_module, "packaged_backend_available", lambda _backend_id: True)
+    path = _porous_simple_sealed(tmp_path)
+
+    with pytest.raises(SystemExit):
+        project_main(["validate", str(path), "--backend", "beat_metal", "--json"], prog="blab project")
+    error = json.loads(capsys.readouterr().out)
+
+    assert error["event"] == "error"
+    assert "not supported on the metal backend" in error["message"]
+    project_main(["validate", str(path), "--backend", "beat_cuda", "--json"], prog="blab project")
+    assert json.loads(capsys.readouterr().out)["valid"] is True
+
+
+def test_production_session_rejects_coupled_porous_regions_on_rocm_before_starting_a_worker(tmp_path: Path) -> None:
+    project = headless_module.load_headless_project(_porous_simple_sealed(tmp_path))
+    prepared = prepare_headless_solve(project, load_headless_solve_spec(None), backend_id="beat_cpu")
+    backend = PhysicalSystemProductionBackend(bem_backend="rocm", julia_executable="julia-not-started")
+
+    with pytest.raises(ValueError, match="not supported on the rocm backend"):
+        backend.create_system_session(prepared.request)
+
+
+def test_solve_plan_accepts_interior_porous_regions_on_any_backend() -> None:
+    project = headless_module.load_headless_project(FILLED_TUBE)
+
+    for backend_id in ("beat_rocm", "beat_metal"):
+        prepare_headless_solve(project, load_headless_solve_spec(None), backend_id=backend_id)
+
+
+RADIATING_FILLED_TUBE = (
+    Path(__file__).parents[1] / "examples" / "radiating_filled_tube" / "radiating_filled_tube.blab.json"
+)
+
+
+def _coupled_request_with_seam(*, loss_factors: tuple[float, float]):
+    """The radiating tube's coupled request, its bounded region split into two Air regions joined by a seam."""
+
+    from blab.physical_model import RegionSeam
+
+    project = headless_module.load_headless_project(RADIATING_FILLED_TUBE)
+    request = prepare_headless_solve(project, load_headless_solve_spec(None), backend_id="beat_cpu").request
+    exterior, bounded = request.compiled_system.regions
+    regions = (
+        exterior,
+        replace(bounded, id="region:front", loss_model={"bulk_loss_factor": loss_factors[0]}),
+        replace(bounded, id="region:back", loss_model={"bulk_loss_factor": loss_factors[1]}),
+    )
+    seam = RegionSeam(region_ids=("region:front", "region:back"), mesh_id="mesh:tube", face_count=8)
+    return replace(request, compiled_system=replace(request.compiled_system, regions=regions, region_seams=(seam,)))
+
+
+@pytest.mark.parametrize("backend", ["rocm", "metal"])
+def test_coupled_seam_between_different_bulk_losses_is_rejected_on_per_node_backends(backend: str) -> None:
+    from blab.solvers.coupled_backend import validate_backend_capabilities
+
+    request = _coupled_request_with_seam(loss_factors=(0.01, 0.0))
+
+    with pytest.raises(
+        ValueError, match=rf"{backend} backend.*equal bulk loss.*'region:front' and 'region:back'.*cpu or cuda"
+    ):
+        validate_backend_capabilities(request, backend)
+
+
+@pytest.mark.parametrize(
+    ("backend", "loss_factors"), [("cpu", (0.01, 0.0)), ("cuda", (0.01, 0.0)), ("rocm", (0.01, 0.01))]
+)
+def test_coupled_seam_is_accepted_with_per_region_operators_or_equal_bulk_loss(
+    backend: str, loss_factors: tuple[float, float]
+) -> None:
+    from blab.solvers.coupled_backend import validate_backend_capabilities
+
+    validate_backend_capabilities(_coupled_request_with_seam(loss_factors=loss_factors), backend)

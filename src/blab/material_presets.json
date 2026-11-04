@@ -1,0 +1,23 @@
+{
+  "reference": "Allard J.F., Atalla N., Propagation of Sound in Porous Media, 2nd ed., Wiley 2009",
+  "units": {
+    "porosity": "1",
+    "flow_resistivity": "Pa s/m^2",
+    "tortuosity": "1",
+    "viscous_characteristic_length": "um",
+    "thermal_characteristic_length": "um",
+    "frame_density": "kg/m^3"
+  },
+  "notes": "Values copied unchanged from the cited tables (checked against the rendered book pages, 2026-11-04). No preset carries a measured static thermal permeability; the Table 13.2 Theta_m(0) value belongs to a double-porosity model and is not used.",
+  "presets": [
+    {"id": "soft_foam", "name": "Soft foam", "table": "Table 11.5 (Foam (3)), p. 271", "porosity": 0.99, "flow_resistivity": 10900, "tortuosity": 1.02, "viscous_characteristic_length": 100, "thermal_characteristic_length": 130, "frame_density": 8.8},
+    {"id": "open_cell_foam", "name": "Open-cell foam", "table": "Table 11.9 (Foam), p. 276", "porosity": 0.98, "flow_resistivity": 6600, "tortuosity": 1.03, "viscous_characteristic_length": 200, "thermal_characteristic_length": 380, "frame_density": 11.2},
+    {"id": "melamine_foam", "name": "Melamine foam", "table": "Table 13.1, p. 328", "porosity": 0.99, "flow_resistivity": 12569, "tortuosity": 1.02, "viscous_characteristic_length": 78, "thermal_characteristic_length": 192, "frame_density": 8.85},
+    {"id": "soft_fibrous", "name": "Soft fibrous", "table": "Table 11.2, p. 254", "porosity": 0.98, "flow_resistivity": 25000, "tortuosity": 1.02, "viscous_characteristic_length": 90, "thermal_characteristic_length": 180, "frame_density": 30},
+    {"id": "felt", "name": "Felt", "table": "Table 11.5 (Felt (1)), p. 271", "porosity": 0.99, "flow_resistivity": 23000, "tortuosity": 1.4, "viscous_characteristic_length": 64, "thermal_characteristic_length": 131, "frame_density": 66},
+    {"id": "blanket", "name": "Blanket", "table": "Table 11.4 (Blanket (1)), p. 270", "porosity": 0.98, "flow_resistivity": 34000, "tortuosity": 1.18, "viscous_characteristic_length": 60, "thermal_characteristic_length": 86, "frame_density": 41},
+    {"id": "mineral_wool", "name": "Mineral wool", "table": "Table 12.2, p. 293", "porosity": 0.95, "flow_resistivity": 34000, "tortuosity": 1.0, "viscous_characteristic_length": 40, "thermal_characteristic_length": 80, "frame_density": 90},
+    {"id": "glass_wool", "name": "Glass wool", "table": "Table 11.8, p. 275", "porosity": 0.94, "flow_resistivity": 40000, "tortuosity": 1.06, "viscous_characteristic_length": 56, "thermal_characteristic_length": 110, "frame_density": 130},
+    {"id": "rock_wool", "name": "Rock wool", "table": "Table 13.2, p. 337", "porosity": 0.94, "flow_resistivity": 135000, "tortuosity": 2.1, "viscous_characteristic_length": 49, "thermal_characteristic_length": 166, "frame_density": 130}
+  ]
+}

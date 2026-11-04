@@ -19,8 +19,9 @@ finite-element package.
 
 Every active mesh surface belongs to an acoustic region and is classified as:
 
-1. **Rigid**: zero normal surface velocity. A bounded rigid wall may optionally
-   use the supported locally reacting Miki porous-lining treatment.
+1. **Rigid**: zero normal surface velocity. A bounded rigid wall of an air
+   region may optionally use the supported locally reacting Miki porous-lining
+   treatment.
 2. **Moving**: motion is supplied by one prescribed-velocity or
    electrodynamic component.
 3. **Interface**: pressure and normal flux are transferred between a bounded
@@ -147,14 +148,119 @@ With bounded regions and no unbounded region, Boundary Lab assembles only the
 first-order pressure FEM system and factors it as a sparse matrix on the CPU.
 Disconnected chambers remain acoustically separate unless one shared
 electrodynamic component couples their moving surfaces. Rigid walls are the
-natural boundary condition; homogeneous bulk loss and rigid-backed Miki wall
-treatments use the same formulations as a coupled solve.
+natural boundary condition; homogeneous bulk loss, rigid-backed Miki wall
+treatments and porous region materials use the same formulations as a coupled
+solve.
 
 A plane-wave tube termination imposes the first-order outgoing condition
 $\partial p/\partial n=-i k p$ for the `exp(+i omega t)` convention. It represents
 the characteristic impedance $\rho c$ of a locally uniform tube, not a hidden
 exterior region. Its accuracy degrades when higher-order or evanescent modes
 are significant at the cut plane. See [Interior FEM Solver](advanced/Interior%20FEM%20Solver.md).
+
+## Porous Region Materials
+
+A bounded region may be filled with a porous material such as foam, fibre
+wadding, or mineral wool. Boundary Lab models the fill as an **equivalent
+fluid**. The FEM unknown is the pore pressure. The region uses a complex,
+frequency-dependent effective density ρ_eq(ω) and bulk modulus K_eq(ω) instead
+of air's ρ0 and ρ0c0². The model assumes that:
+
+- the material is homogeneous and isotropic throughout the region;
+- pores and fibres are much smaller than the wavelength, so pressure and
+  velocity are macroscopic averages over many pores;
+- the frame is either rigid or limp. Full Biot poroelasticity, an elastic frame
+  with its own waves and resonances, is not modelled;
+- the acoustics are linear. Flow resistivity does not depend on level.
+
+The effective properties follow J.-F. Allard and N. Atalla, *Propagation of
+Sound in Porous Media*, 2nd ed., Wiley 2009:
+
+- Johnson effective density ρ(ω) = ρ0[α∞ + νφ/(jωq0)·G(ω)] with q0 = η/σ
+  (Eqs. 5.50, 5.52).
+- Simplified Lafarge bulk modulus K(ω) with static thermal permeability k0′
+  (Eqs. 5.51, 5.53). JCA uses k0′ = φΛ′²/8 (Eqs. 5.54, 5.55), which reduces it to
+  the Champoux–Allard form. JCAL with that k0′ is JCA.
+- Equivalent fluid ρ_eq = ρ/φ and K_eq = K/φ (Eqs. 5.43, 5.44). In this form,
+  pressure and normal volume velocity are continuous at a region seam or an
+  FEM-BEM interface without a porosity factor. Moving boundaries and interfaces
+  of a porous region relate velocity to the pressure gradient through ρ_eq.
+- A limp frame replaces the rigid-frame density with Panneton's approximation
+  ρ_limp = (ρ_t·ρ_eq − ρ0²)/(ρ_t + ρ_eq − 2ρ0), with ρ_t = ρ1 + φρ0
+  (Eq. 11.55). K_eq is unchanged.
+
+ρ0 and c0 come from the region. The air viscosity η = 1.84 × 10⁻⁵ Pa·s, the
+Prandtl number ≈ 0.72, and γ = 1.4 are the constants that thermoviscous wall
+losses use. The static pressure is P0 = ρ0c0²/γ, so a resistance-free, fully
+open material reduces exactly to the region's air. The book writes fields as
+e^(+jωt). That matches Boundary Lab's `exp(+i omega t)` convention with j = i,
+so a passive material has Im ρ_eq < 0. The BEAT Engine
+[Porous materials](https://github.com/JWSound/BEAT_Engine/blob/main/docs/Porous%20Materials.md) page lists the full formulas, the assembly, and
+the validation against analytical tube and layer solutions.
+
+### Choosing a model and frame
+
+- **JCA** needs porosity, flow resistivity, tortuosity, and the viscous and
+  thermal characteristic lengths. All built-in presets provide these values.
+- **JCAL** adds a measured static thermal permeability k0′, which refines the
+  low-frequency bulk modulus (the isothermal-to-adiabatic transition). Without a
+  measurement, keep JCA. The dialog prefills k0′ = φΛ′²/8, which reproduces JCA.
+- A **rigid frame** assumes the skeleton does not move. This fits heavy or
+  stiff materials such as mineral wool, glass-wool boards, and foam bonded to
+  a wall. It also fits any material well above its decoupling frequency
+  F_d ≈ σφ²/(2πρ1).
+- A **limp frame** assumes the skeleton moves with the air but has no
+  stiffness. This fits light, loosely packed wadding. Below F_d its density
+  approaches the total apparent density ρ_t, which adds the fibres' inertia to
+  the air. Well above F_d it approaches the rigid result. For the Soft fibrous
+  preset (σ = 25 000 Pa·s/m², φ = 0.98, ρ1 = 30 kg/m³), F_d ≈ 127 Hz.
+- Neither frame represents frame resonances, or compressed or bonded elastic
+  foams whose skeleton stiffness matters in the band. Those cases need Biot
+  theory.
+
+Preset values are book data for specific samples. Real products vary, so use
+manufacturer or measured data where available. Typical loudspeaker waddings
+such as polyester, BAF, or Sonofil are not in the book and have no preset.
+
+### Mesh resolution
+
+A porous region needs a finer mesh than air. Its wavelength
+λ = 2π/Re(k_eq), with k_eq = ω√(ρ_eq/K_eq), is shorter, and the wave decays
+along its path. At 5 kHz it is about 57.5 mm in Soft foam and 52.6 mm in Glass
+wool, against 68.6 mm in air. The BEAT Engine convergence study measured these
+thresholds at the maximum solve frequency for about 5 % (0.4 dB)
+input-impedance error:
+
+- P1: at least 11 elements per porous wavelength;
+- P2: at least 3 elements per porous wavelength.
+
+The compiler compares each porous region's mean tetrahedron edge with λ/N at
+the highest solve frequency. If the edge is longer, it reports the warning
+`porous_mesh_too_coarse` with the needed edge length. The solve still runs.
+Boundary Lab does not refine the mesh. Set a smaller volume element size for
+that region where the mesh is made, in Gmsh or the generator, and re-import
+it. The check uses the mean edge, so a strongly anisotropic mesh, such as thin
+slabs across a tube, may warn although it resolves the propagation direction.
+
+### Porous-region limitations
+
+Inside porous regions, Boundary Lab's velocity-derived field displays compute
+particle velocity from the pressure gradient with the air density ρ0, not with
+ρ_eq(ω). The affected displays are Particle Velocity Magnitude and Acoustic Flow
+Arrows (active and reactive intensity, animated velocity) on observation planes
+and in the Element Field. Their values inside a porous region differ from the
+macroscopic velocity by the complex factor ρ_eq/ρ0 in magnitude and phase.
+Pressure, SPL, and impedance are correct everywhere. So are the solver's
+diaphragm, interface-velocity, and exterior results, and velocity displays in
+air regions.
+
+Porous materials are also limited to bounded FEM regions. They cannot be used
+in the exterior BEM region or in a lumped sealed rear chamber. Their boundaries
+cannot carry plane-wave terminations, thermoviscous wall losses, or Miki
+linings. Coupled porous solves run on the BEAT CPU and CUDA backends only. ROCm
+and Metal reject them before the solve. Interior porous solves always run on
+CPU. Anisotropic, double-porosity, full Pride–Lafarge, and Wilson models are not
+available, and JCA/JCAL cannot be used as a locally reacting wall impedance.
 
 ## Coupled FEM-BEM Model
 
@@ -215,9 +321,12 @@ Boundary Lab currently does not provide:
 - automatic conversion from a conventional T/S set containing Mms to the
   direct Mmd parameter used by the electrodynamic model;
 - passive-radiator components;
-- arbitrary surface impedance functions or spatially varying volume loss;
-- multiple unbounded exterior regions or different fluids within one coupled
-  system;
+- arbitrary surface impedance functions or spatially varying volume loss
+  within one region (materials are homogeneous per region);
+- poroelastic (Biot) materials, frame resonances, or porous material outside
+  bounded FEM regions (see [Porous Region Materials](#porous-region-materials));
+- multiple unbounded exterior regions or different gases (density or sound
+  speed) within one coupled system;
 - iterative, fast-multipole, or distributed coupled solving.
 
 Use measurement or a suitable structural/electroacoustic tool where these

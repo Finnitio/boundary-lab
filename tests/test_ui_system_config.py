@@ -1600,33 +1600,33 @@ def test_combined_plane_requests_both_fem_and_bem_spatial_fields() -> None:
     assert {BEM_BOUNDARY_DOMAIN_ID, FEM_VOLUME_DOMAIN_ID} <= domain_ids
 
 
-def test_system_dialog_edits_region_loss_and_rigid_wall_impedance() -> None:
-    dialog = _configured_fixture_dialog()
-    bounded_row = next(
+def _bounded_region_row(dialog) -> int:
+    return next(
         row
         for row in range(dialog.regions_table.rowCount())
         if dialog._region_kind(row) == AcousticRegionKind.BOUNDED_AIR
     )
-    loss_combo = dialog.regions_table.cellWidget(bounded_row, 4)
-    assert isinstance(loss_combo, QComboBox)
-    assert loss_combo.isEnabled()
-    assert [loss_combo.itemData(index) for index in range(loss_combo.count())] == [
-        0.0,
-        0.002,
-        0.005,
-        0.01,
-        0.02,
-        0.05,
-    ]
-    loss_combo.setCurrentIndex(loss_combo.findData(0.02))
+
+
+def test_system_dialog_edits_region_loss_and_rigid_wall_impedance(monkeypatch) -> None:
+    dialog = _configured_fixture_dialog()
+    assert dialog.regions_table.horizontalHeaderItem(4).text() == "Material"
+    bounded_row = _bounded_region_row(dialog)
+    material_button = dialog.regions_table.cellWidget(bounded_row, 4)
+    assert isinstance(material_button, QPushButton)
+    assert material_button.isEnabled()
+    assert material_button.text() == "Air"
+    _accept_material_dialog(monkeypatch, {"bulk_loss_factor": 0.02})
+    material_button.click()
+    assert material_button.text() == "Air – loss 0.02"
     unbounded_row = next(
         row
         for row in range(dialog.regions_table.rowCount())
         if dialog._region_kind(row) == AcousticRegionKind.UNBOUNDED_AIR
     )
-    unbounded_loss_combo = dialog.regions_table.cellWidget(unbounded_row, 4)
-    assert isinstance(unbounded_loss_combo, QComboBox)
-    assert not unbounded_loss_combo.isEnabled()
+    unbounded_button = dialog.regions_table.cellWidget(unbounded_row, 4)
+    assert isinstance(unbounded_button, QPushButton)
+    assert not unbounded_button.isEnabled()
 
     wall_row = next(
         row
@@ -1659,6 +1659,84 @@ def test_system_dialog_edits_region_loss_and_rigid_wall_impedance() -> None:
     assert interior.loss_model["bulk_loss_factor"] == pytest.approx(0.02)
     assert wall.parameters["wall_impedance"]["thickness_m"] == pytest.approx(0.03)
     assert wall.parameters["wall_impedance"]["flow_resistivity_pa_s_per_m2"] == pytest.approx(5000.0)
+
+
+def _accept_material_dialog(monkeypatch, result: dict, opened: list | None = None) -> None:
+    """Replace the modal Material dialog with one that the user accepts with ``result``."""
+
+    class Editor:
+        def __init__(self, loss_model, parent=None, *, region_name=""):
+            if opened is not None:
+                opened.append((dict(loss_model), region_name))
+
+        def exec(self):
+            return system_config_module.QDialog.DialogCode.Accepted
+
+        def loss_model(self):
+            return dict(result)
+
+    monkeypatch.setattr(system_config_module, "RegionMaterialDialog", Editor)
+
+
+GLASS_WOOL_JCAL_LIMP = {
+    "model": "jcal",
+    "frame": "limp",
+    "porosity": 0.94,
+    "flow_resistivity_pa_s_per_m2": 40_000.0,
+    "tortuosity": 1.06,
+    "viscous_characteristic_length_m": 56e-6,
+    "thermal_characteristic_length_m": 110e-6,
+    "static_thermal_permeability_m2": 0.94 * 110e-6**2 / 8,
+    "frame_density_kg_per_m3": 130.0,
+    "preset": "glass_wool",
+}
+
+
+def test_material_dialog_result_round_trips_through_the_project(monkeypatch) -> None:
+    dialog = _configured_fixture_dialog()
+    row = _bounded_region_row(dialog)
+    button = dialog.regions_table.cellWidget(row, 4)
+    opened: list = []
+    _accept_material_dialog(monkeypatch, GLASS_WOOL_JCAL_LIMP, opened)
+
+    button.click()
+
+    assert opened == [({"bulk_loss_factor": 0.0}, "Interior Air 1")]
+    assert button.text() == "JCAL – Glass wool"
+    system = dialog.physical_system()
+    interior = next(region for region in system.regions if region.kind == AcousticRegionKind.BOUNDED_AIR)
+    assert interior.loss_model == GLASS_WOOL_JCAL_LIMP
+    compiled = PhysicalSystemCompiler().compile(system)
+    compiled_interior = next(region for region in compiled.regions if region.id == interior.id)
+    assert "preset" not in compiled_interior.loss_model
+
+    restored = SystemConfigDialog(inspect_system_meshes(_fixture_mesh_entries()), system, ("main",))
+    restored_button = restored.regions_table.cellWidget(_bounded_region_row(restored), 4)
+    assert restored_button.text() == "JCAL – Glass wool"
+    assert restored.physical_system().regions == system.regions
+
+
+def test_lossless_and_legacy_air_regions_round_trip_unchanged_through_the_real_dialog(monkeypatch) -> None:
+    for loss_factor in (0.0, 0.02):
+        dialog = _configured_fixture_dialog()
+        system = dialog.physical_system()
+        system = replace(
+            system,
+            regions=tuple(
+                replace(region, loss_model={"bulk_loss_factor": loss_factor})
+                if region.kind == AcousticRegionKind.BOUNDED_AIR
+                else region
+                for region in system.regions
+            ),
+        )
+        restored = SystemConfigDialog(inspect_system_meshes(_fixture_mesh_entries()), system, ("main",))
+        button = restored.regions_table.cellWidget(_bounded_region_row(restored), 4)
+        assert button.text() == ("Air" if loss_factor == 0.0 else "Air – loss 0.02")
+        assert restored.physical_system().regions == system.regions
+
+        editor = system_config_module.RegionMaterialDialog(dict(button.property("loss_model")))
+        editor.model_combo.setCurrentIndex(editor.model_combo.findData("air"))
+        assert editor.loss_model() == {"bulk_loss_factor": loss_factor}
 
 
 def _thermoviscous_wall_row(dialog):

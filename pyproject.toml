@@ -43,9 +43,11 @@ packages = ["src/blab"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 timeout = 60
-addopts = "-m 'not slow'"
+# Solver-backed tests start BEAT Engine (Julia) and are opt-in: `python -m pytest -m slow`.
+# Use `python -m pytest -n auto -m ""` to run everything.
+addopts = ["-m", "not slow"]
 markers = [
-  "slow: slow test, skipped by default; run everything with `-n auto -m \"\"`",
+  "slow: solver-backed or otherwise slow test; deselected by default",
 ]
 
 [tool.ruff]

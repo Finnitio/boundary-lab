@@ -14,6 +14,7 @@ from typing import Any, Callable, Iterable
 
 import numpy as np
 
+from blab.acoustic_materials import material_of_region
 from blab.generators.base import generated_mesh_id
 from blab.generators.registry import restore_generator_document
 from blab.generators.resources import active_assembly_system, generated_mesh_entries
@@ -37,7 +38,7 @@ from blab.solve_results import (
     fem_volume_result_domain,
 )
 from blab.solve_results.model import INTERFACE_RADIATION_ID, RADIATION_SOURCE_DOMAIN_ID
-from blab.solvers.beat_engine_runtime import DEFAULT_BEAT_ENGINE_CUDA_PROJECT
+from blab.solvers.beat_engine_runtime import BEAT_ENGINE_BACKENDS, DEFAULT_BEAT_ENGINE_CUDA_PROJECT
 from blab.solvers.coupled_backend import PhysicalSystemProductionBackend, validate_solve_plan
 from blab.solvers.engine_distribution import backend_catalog
 from blab.solvers.registry import normalize_backend_id, packaged_backend_available
@@ -278,13 +279,24 @@ def prepare_headless_solve(
     """Build and validate a canonical system request from a project and overlay."""
 
     preferences = project.preferences
+    frequencies = spec.frequencies_hz
+    if frequencies is None:
+        frequencies = tuple(
+            float(value)
+            for value in build_log_frequencies(
+                preferences.freq_min_hz,
+                preferences.freq_max_hz,
+                preferences.freq_count,
+            )
+        )
     sphere_angle_deg = min(max(float(preferences.balloon_angle_precision_deg), 0.5), 15.0)
     spherical_count = max(int(round(41253.0 / sphere_angle_deg**2)), 1)
     prepared = prepare_system_solve(
         project.physical_system,
-        freq_min_hz=preferences.freq_min_hz,
-        freq_max_hz=preferences.freq_max_hz,
-        freq_count=preferences.freq_count,
+        # The final frequencies replace the preliminary sweep below; their maximum sets the mesh check.
+        freq_min_hz=min(frequencies),
+        freq_max_hz=max(frequencies),
+        freq_count=len(frequencies),
         observation_distance_m=preferences.polar_observation_distance_m,
         polar_angle_step_deg=preferences.polar_angle_step_deg,
         spherical_sampling_enabled=preferences.spherical_sampling_enabled,
@@ -312,16 +324,6 @@ def prepare_headless_solve(
     }:
         raise ValueError("Interior FEM solves cannot retain BEM boundary quantities.")
     request = prepared.request
-    frequencies = spec.frequencies_hz
-    if frequencies is None:
-        frequencies = tuple(
-            float(value)
-            for value in build_log_frequencies(
-                preferences.freq_min_hz,
-                preferences.freq_max_hz,
-                preferences.freq_count,
-            )
-        )
 
     if "interface_radiated_pressure" in spec.retain and not request.compiled_system.interfaces:
         raise ValueError("Retaining interface radiation requires a coupled system with FEM-BEM interfaces.")
@@ -356,7 +358,9 @@ def prepare_headless_solve(
         outputs=tuple(outputs),
         solver_options=options,
     )
-    validate_solve_plan(request)
+    # A local BEAT backend is known before submission; a remote server selects its own.
+    engine_backend = _engine_backend_name(backend_id)
+    validate_solve_plan(request, bem_backend=engine_backend if engine_backend in BEAT_ENGINE_BACKENDS else None)
     return replace(prepared, request=request, result_domains=tuple(domains))
 
 
@@ -383,6 +387,9 @@ def validation_summary(
         "excitation_port_ids": list(request.excitation_port_ids),
         "output_ids": [output.id for output in request.outputs],
         "meshes": mesh_entries,
+        "region_materials": _region_material_entries(request.compiled_system),
+        "warnings": _warning_entries(request.compiled_system),
+        "region_seams": _region_seam_entries(request.compiled_system),
         "assumptions": [
             {"status": item.status.value, "statement": item.statement} for item in request.compiled_system.assumptions
         ],
@@ -443,6 +450,9 @@ class HeadlessResultWriter:
             "solver_options": _json_safe(prepared.request.solver_options),
             "engine_runs": [],
             "meshes": _mesh_manifest_entries(prepared.request.compiled_system),
+            "region_materials": _region_material_entries(prepared.request.compiled_system),
+            "region_seams": _region_seam_entries(prepared.request.compiled_system),
+            "warnings": _warning_entries(prepared.request.compiled_system),
             "completion_mask": self.completion.tolist(),
             "results": self.results,
         }
@@ -573,7 +583,7 @@ def run_headless_solve(
     session = None
     try:
         backend = backend or PhysicalSystemProductionBackend(
-            bem_backend=backend_id.removeprefix("beat_"),
+            bem_backend=_engine_backend_name(backend_id),
             precision=prepared.request.solver_options.get("precision", "float32"),
             julia_executable=julia_executable,
             julia_threads=julia_threads,
@@ -830,6 +840,41 @@ def _mesh_manifest_entries(system) -> list[dict[str, Any]]:
             }
         )
     return entries
+
+
+def _engine_backend_name(backend_id: str) -> str:
+    """The BEAT Engine backend name (``cpu``, ``cuda``, ...) of a Boundary Lab ``beat_*`` backend id."""
+
+    return backend_id.removeprefix("beat_")
+
+
+def _warning_entries(system) -> list[dict[str, Any]]:
+    """Non-blocking validation findings (coarse porous mesh, suspicious material) a run was made despite."""
+
+    return [warning.as_dict() for warning in system.warnings]
+
+
+def _region_seam_entries(system) -> list[dict[str, Any]]:
+    """Faces two bounded regions share on one mesh without an assignment (sound passes through)."""
+
+    return [
+        {"region_ids": list(seam.region_ids), "mesh_id": seam.mesh_id, "face_count": seam.face_count}
+        for seam in system.region_seams
+    ]
+
+
+def _region_material_entries(system) -> list[dict[str, Any]]:
+    """Each region's normalized material (explicit model, SI parameters) for reproducible runs."""
+
+    return [
+        {
+            "region_id": region.id,
+            "name": region.name,
+            "kind": region.kind.value,
+            "material": material_of_region(region).to_loss_model(),
+        }
+        for region in system.regions
+    ]
 
 
 def _command_available(command: str) -> bool:

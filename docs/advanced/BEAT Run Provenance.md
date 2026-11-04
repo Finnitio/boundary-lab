@@ -58,6 +58,14 @@ project snapshot, requested options, and application-side mesh hashes. Inputs mu
 remain unchanged during a solve; these hashes do not turn mutable files into an
 atomic snapshot. General process environment variables are not recorded.
 
+`region_materials` records every bounded region of the request, in request order, as
+`{"region_id", "material"}` with the engine-normalized material (`region_material_wire`):
+air as `{"model": "air", "bulk_loss_factor"}` (also for a legacy or empty `loss_model`),
+porous regions with all their model and frame parameters. It is present for air-only
+requests too and empty when the request has no bounded region. The per-frequency
+`fem_region_materials` diagnostic (porous requests only) additionally carries the
+equivalent density and bulk modulus; see [Porous Materials](https://github.com/JWSound/BEAT_Engine/blob/main/docs/Porous%20Materials.md).
+
 ## Artifact propagation
 
 - Frequency JSON metadata retains the full result diagnostics.
@@ -65,6 +73,11 @@ atomic snapshot. General process environment variables are not recorded.
   worker announcement in `worker` when one was captured. A failure/cancellation
   before the first result can retain the announcement without claiming an actual
   numerical execution. No worker announcement is synthesized for one-shot solves.
+  Boundary Lab adds its own validation records next to them: `meshes`,
+  `region_materials` (`{region_id, name, kind, material}` for every region),
+  `region_seams` (`{region_ids, mesh_id, face_count}`) and `warnings`
+  (`{code, region_id, message}`, the non-blocking findings the run was made
+  despite). See [the CLI workflow](cli-workflow.md#headless-project-workflow).
 - `SolvedSystemBuilder` collects distinct records into `SolveProvenance.engine_runs`
   for GUI and headless package workflows. Snapshots copy provenance so later
   mutations cannot alter previous snapshots.

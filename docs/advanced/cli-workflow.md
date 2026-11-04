@@ -72,6 +72,42 @@ Validation migrates the project schema, resolves paths relative to the project,
 loads and compiles all meshes and physical groups, checks backend capabilities,
 and reports the solve kind, assumptions, mesh hashes, excitations, outputs, and
 frequency range. It does not launch Julia or assemble solver matrices.
+The JSON summary also lists:
+
+- `region_materials`: each region's normalized material as sent to the engine,
+  as `{region_id, name, kind, material}`. `material` holds `model` (`air`,
+  `jca`, or `jcal`), `frame` for porous models, and the SI parameters. Legacy
+  `{}` and `{"bulk_loss_factor": η}` appear as explicit `air`. The editor's
+  `preset` name is not included.
+- `region_seams`: faces shared by two bounded regions on one mesh without a
+  boundary assignment, as `{region_ids, mesh_id, face_count}`. Sound passes
+  through these faces. The list is `[]` when there are none. A shared face
+  assigned in only one region is a validation error.
+- `warnings`: findings that do not block a solve, as
+  `{code, region_id, message}`. The list is `[]` when there are none. The text
+  output of `validate` prints each one as a `warning: [code] message` line.
+
+Warning codes:
+
+- `porous_mesh_too_coarse` flags a porous region whose mean tetrahedron edge
+  is longer than the BEAT Engine convergence-study threshold at the maximum
+  solve frequency: 11 P1 or 3 P2 elements per porous wavelength, about 5 %
+  input-impedance error. The maximum includes a `--request` overlay's
+  frequencies. The message gives the needed edge length. Remesh that region's
+  volume with that element size or smaller.
+- `porous_thermal_length_below_viscous_length` flags a JCA/JCAL material whose
+  thermal characteristic length Λ′ is smaller than its viscous length Λ. This is
+  unusual for measured data.
+
+Run manifests record `region_materials`, `region_seams` and `warnings` in the
+same form, so a run made despite a warning keeps that finding.
+The material contract is described in
+[Physical System Model](../Physical%20System%20Model.md#materials).
+`examples/filled_tube` (an interior tube filled with JCA),
+`examples/porous_layer_tube` (air in front of a porous layer on one mesh,
+joined by a region seam) and `examples/radiating_filled_tube` (a filled tube
+radiating through an FEM-BEM interface) are small porous projects for checking
+the workflow.
 
 Run the project using its saved frequency, polar, sphere, symmetry, channel, and
 observation-plane settings:
@@ -111,6 +147,10 @@ automatic selection. `beat_cpu` uses the ordinary CPU path for exterior-only
 projects, sparse UMFPACK pressure FEM for interior-only projects, and exact FEM
 interface condensation for coupled production projects.
 The former `beat_cpu_condensed` ID remains a compatibility alias for `beat_cpu`.
+Coupled projects with porous regions solve on `beat_cpu` and `beat_cuda` only;
+`blab project validate` and `solve` reject them on `beat_rocm` and `beat_metal`
+before a worker starts, naming the backend. Interior-only porous projects
+always solve on CPU and are accepted with any backend.
 `--julia-executable` and `--julia-threads` select the Julia installation and
 thread count. The output directory must not already exist, which prevents an
 agent from accidentally overwriting a previous run.
@@ -282,7 +322,9 @@ speaker-check/
 ```
 
 `manifest.json` records the backend, solver options, phasor convention,
-frequency axis, excitation ids, completion mask, and run status. Each frequency
+frequency axis, excitation ids, completion mask, and run status, plus the
+compiled meshes and the validation `region_materials`, `region_seams` and
+`warnings` described above. Each frequency
 is committed independently, so a failed or interrupted run retains completed
 complex quantities and diagnostics. The frequency JSON maps semantic quantity
 ids to arrays in the corresponding NPZ file. The result phasor convention is
