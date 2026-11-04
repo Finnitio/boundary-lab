@@ -34,7 +34,13 @@ from blab.component_symmetry import (
     infer_weighted_surface_area,
 )
 from blab.config import normalize_symmetry
-from blab.fem_topology import mean_tetrahedron_edge_length, selected_tetrahedra, selected_volume_surface_tags
+from blab.fem_topology import (
+    mean_tetrahedron_edge_length,
+    selected_tetrahedra,
+    selected_volume_exterior_faces,
+    selected_volume_surface_tags,
+    triangle_tags_by_face,
+)
 from blab.interface_conform import InterfaceConformError, build_conforming_interface_map
 from blab.mesh_data import read_resource_mesh
 from blab.physical_model import (
@@ -57,6 +63,7 @@ from blab.physical_model import (
     PhysicalGroupRef,
     PhysicalSystem,
     PhysicsAssumption,
+    RegionSeam,
     ResolvedPhysicalGroup,
     ValidationWarning,
 )
@@ -99,6 +106,7 @@ class PhysicalSystemCompiler:
         compiled_boundaries_by_id = {boundary.id: boundary for boundary in compiled_boundaries}
         compiled_components, impedance_normalization = self._compile_components(system, symmetry)
 
+        region_seams = self._region_seams(compiled_regions, compiled_boundaries, meshes_by_id)
         self._validate_boundary_coverage(compiled_regions, compiled_boundaries, meshes_by_id)
         compiled_interfaces = tuple(
             self._compile_interface(
@@ -132,6 +140,7 @@ class PhysicalSystemCompiler:
                 if freq_max_hz is None
                 else self._mesh_resolution_warnings(compiled_regions, meshes_by_id, freq_max_hz)
             ),
+            region_seams=region_seams,
             contract_version=2
             if any(
                 component.kind == ComponentKind.IDEAL_VELOCITY_SOURCE
@@ -801,6 +810,78 @@ class PhysicalSystemCompiler:
             tag=int(tag),
             name=name,
         )
+
+    def _region_seams(
+        self,
+        regions: tuple[CompiledRegion, ...],
+        compiled_boundaries: tuple[CompiledBoundary, ...],
+        meshes_by_id: dict[str, MeshResource],
+    ) -> tuple[RegionSeam, ...]:
+        """Classify the faces shared by two bounded regions on one mesh (mirrors the engine).
+
+        Unassigned on both sides: a region seam. Assigned on both sides: a thin rigid
+        partition (each side keeps its own boundary). Assigned on one side only: rejected,
+        because the engine would have to drop one side's boundary.
+        """
+
+        bounded = [region for region in regions if region.kind == AcousticRegionKind.BOUNDED_AIR]
+        seams: list[RegionSeam] = []
+        issues: list[str] = []
+        for mesh_id in dict.fromkeys(mesh_id for region in bounded for mesh_id in region.mesh_ids):
+            on_mesh = [region for region in bounded if mesh_id in region.mesh_ids]
+            if len(on_mesh) < 2:
+                continue
+            mesh = self._read_mesh(meshes_by_id[mesh_id])
+            exterior_faces = {}
+            for region in on_mesh:
+                volume_tags = {int(group.tag) for group in region.volume_groups if group.mesh_id == mesh_id}
+                try:
+                    exterior_faces[region.id] = selected_volume_exterior_faces(mesh, volume_tags)
+                except ValueError:
+                    continue  # reported by the boundary coverage check
+            assigned_tags = {
+                region.id: {
+                    boundary.group.tag
+                    for boundary in compiled_boundaries
+                    if boundary.region_id == region.id and boundary.group.mesh_id == mesh_id
+                }
+                for region in on_mesh
+            }
+            tags_by_face = triangle_tags_by_face(mesh)
+            for index, first in enumerate(on_mesh):
+                for second in on_mesh[index + 1 :]:
+                    if first.id not in exterior_faces or second.id not in exterior_faces:
+                        continue
+                    shared = exterior_faces[first.id] & exterior_faces[second.id]
+                    if not shared:
+                        continue
+                    seam_faces = 0
+                    one_sided: dict[str, set[int]] = {first.id: set(), second.id: set()}
+                    for face in shared:
+                        tags = tags_by_face.get(face, frozenset())
+                        by_first = tags & assigned_tags[first.id]
+                        by_second = tags & assigned_tags[second.id]
+                        if not by_first and not by_second:
+                            seam_faces += 1
+                        elif not by_first or not by_second:
+                            one_sided[first.id if by_first else second.id].update(by_first or by_second)
+                    for owner, tags in one_sided.items():
+                        if not tags:
+                            continue
+                        other = second.id if owner == first.id else first.id
+                        names = [self._name_for_tag(mesh, tag, 2, required=False) or str(tag) for tag in sorted(tags)]
+                        issues.append(
+                            f"Regions '{first.id}' and '{second.id}' share faces on mesh '{mesh_id}' that are "
+                            f"assigned only by region '{owner}' ({', '.join(names)}). Assign the shared faces in "
+                            f"region '{other}' too (a thin rigid partition) or in neither region (a region seam)."
+                        )
+                    if seam_faces:
+                        seams.append(
+                            RegionSeam(region_ids=(first.id, second.id), mesh_id=mesh_id, face_count=seam_faces)
+                        )
+        if issues:
+            raise PhysicalModelCompileError(issues)
+        return tuple(seams)
 
     def _validate_boundary_coverage(
         self,

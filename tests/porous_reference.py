@@ -85,3 +85,66 @@ def closed_tube_input_impedance(fluid: EquivalentFluid, frequency_hz: float, len
     """Input impedance p/u of a rigidly closed tube of length L: Z = -j Z_c cot(k_c L)."""
 
     return -1j * fluid.characteristic_impedance / cmath.tan(fluid.wavenumber(frequency_hz) * length_m)
+
+
+def air(*, density_kg_per_m3: float, sound_speed_m_per_s: float) -> EquivalentFluid:
+    """Lossless air as a fluid layer: rho0 and K = rho0 c0^2."""
+
+    return EquivalentFluid(
+        density_kg_per_m3=complex(density_kg_per_m3),
+        bulk_modulus_pa=complex(density_kg_per_m3 * sound_speed_m_per_s**2),
+    )
+
+
+def layer_transfer_matrix(
+    fluid: EquivalentFluid, frequency_hz: float, thickness_m: float
+) -> tuple[tuple[complex, complex], tuple[complex, complex]]:
+    """Fluid-layer transfer matrix (Ch. 11): [p, v] on the front face = T [p, v] on the back face.
+
+    v is the normal (macroscopic) velocity pointing from the front to the back face.
+    """
+
+    kd = fluid.wavenumber(frequency_hz) * thickness_m
+    zc = fluid.characteristic_impedance
+    return ((cmath.cos(kd), 1j * zc * cmath.sin(kd)), (1j * cmath.sin(kd) / zc, cmath.cos(kd)))
+
+
+def driven_layer_pressure(
+    fluid: EquivalentFluid,
+    frequency_hz: float,
+    *,
+    layer_length_m: float,
+    position_m: float,
+    termination_impedance: complex,
+    input_velocity: complex,
+) -> complex:
+    """Pressure at ``position_m`` in a layer driven at 0 with ``input_velocity`` and terminated at
+    ``layer_length_m`` by ``termination_impedance`` (p / v on the back face)."""
+
+    (a, b), (c, d) = layer_transfer_matrix(fluid, frequency_hz, layer_length_m)
+    back_velocity = input_velocity / (c * termination_impedance + d)
+    (a, b), _ = layer_transfer_matrix(fluid, frequency_hz, layer_length_m - position_m)
+    return (a * termination_impedance + b) * back_velocity
+
+
+@dataclass(frozen=True)
+class SectionResponse:
+    """Plane-wave response of a uniform section driven at its inlet: Z_in = p_0/v_0 and v_L/v_0."""
+
+    input_impedance: complex
+    velocity_ratio: complex
+
+
+def loaded_section(fluid: EquivalentFluid, frequency_hz: float, length_m: float, load: complex) -> SectionResponse:
+    """Transfer matrix of a uniform section of length L terminated by Z_L = p_L/v_L.
+
+    [p_0, v_0] = T [p_L, v_L] with T = [[cos kL, j Z_c sin kL], [j sin kL / Z_c, cos kL]].
+    """
+
+    k, zc = fluid.wavenumber(frequency_hz), fluid.characteristic_impedance
+    t11, t12 = cmath.cos(k * length_m), 1j * zc * cmath.sin(k * length_m)
+    t21, t22 = 1j * cmath.sin(k * length_m) / zc, cmath.cos(k * length_m)
+    return SectionResponse(
+        input_impedance=(t11 * load + t12) / (t21 * load + t22),
+        velocity_ratio=1.0 / (t21 * load + t22),
+    )
