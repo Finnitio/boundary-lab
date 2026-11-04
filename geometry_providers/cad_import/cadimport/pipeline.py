@@ -143,7 +143,8 @@ class _Openings:
     """What finding the openings into the air bodies needs; a placement moves only ``edge_points``.
 
     ``direct`` are the exterior faces lying on air faces: openings whatever the placement.
-    ``cover_warnings`` name the exterior faces that cover air faces instead.
+    ``fixed_warnings`` hold what holds whatever the placement: overlapping air bodies and the
+    exterior faces that cover air faces instead of opening into them.
     """
 
     face_edges: Mapping[int, tuple[int, ...]]  # boundary curves of the outer air and exterior faces
@@ -153,7 +154,7 @@ class _Openings:
     air_body: Mapping[int, str]  # outer air face -> the air body it bounds
     exterior: tuple[int, ...]
     direct: tuple[int, ...]
-    cover_warnings: tuple[str, ...]
+    fixed_warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -228,7 +229,7 @@ def place_preview(
         # From the faces' points: a turned box around them would grow at angles off the axes.
         bbox_m=(tuple(points.min(axis=0).tolist()), tuple(points.max(axis=0).tolist())),
         symmetry=found.symmetry,
-        warnings=openings.cover_warnings + found.warnings,
+        warnings=openings.fixed_warnings + found.warnings,
     )
     return replace(preview, geometry=geometry, points=points, openings=openings, **_shown(rotation_deg, translation_m))
 
@@ -245,7 +246,7 @@ def preview_to_json(preview: CadPreview) -> dict:
         air_body=[[f, b] for f, b in openings.air_body.items()],
         exterior=list(openings.exterior),
         direct=list(openings.direct),
-        cover_warnings=list(openings.cover_warnings),
+        fixed_warnings=list(openings.fixed_warnings),
     )
     return data
 
@@ -286,7 +287,7 @@ def preview_from_json(data: Mapping) -> CadPreview:
         dict(o["air_body"]),
         tuple(o["exterior"]),
         tuple(o["direct"]),
-        tuple(o["cover_warnings"]),
+        tuple(o["fixed_warnings"]),
     )
     return CadPreview(
         geometry,
@@ -611,14 +612,9 @@ def _analyse(gmsh, path: Path, placement: tuple[np.ndarray, np.ndarray], closed_
         _, children = occ.fragment(inputs, [])
     occ.synchronize()
 
-    volumes: dict[str, list[int]] = {}
-    body_of_volume = {}
-    for name, kids in zip(solid_names, children, strict=False):
-        volumes[name] = [t for d, t in kids if d == 3]
-        for volume in volumes[name]:
-            if volume in body_of_volume:
-                raise ValueError(f"Air bodies '{body_of_volume[volume]}' and '{name}' overlap.")
-            body_of_volume[volume] = name
+    volumes, body_of_volume, overlap_warnings = _owned_volumes(
+        gmsh, {name: [t for d, t in kids if d == 3] for name, kids in zip(solid_names, children, strict=False)}
+    )
     sheet_children = [[t for d, t in kids if d == 2] for kids in children[len(solids) :]]
     exterior = sorted({f for kids in sheet_children for f in kids})
 
@@ -635,10 +631,10 @@ def _analyse(gmsh, path: Path, placement: tuple[np.ndarray, np.ndarray], closed_
     # An exterior face lying on an air face opens into it, unless it is part of a larger exterior face.
     split = {f for kids in sheet_children if len(kids) > 1 for f in kids}
     exterior_name = {f: name for name, faces in exterior_bodies.items() for f in faces}
-    cover_warnings, direct = [], []
+    fixed_warnings, direct = list(overlap_warnings), []
     for f in sorted(set(exterior).intersection(outer_air)):
         if f in split:
-            cover_warnings.append(
+            fixed_warnings.append(
                 f"Exterior surface '{exterior_name[f]}' covers a face of air body "
                 f"'{body_of_volume[face_volumes[f][0]]}' (face {f}) instead of opening into it; "
                 "no interface was created there."
@@ -688,7 +684,7 @@ def _analyse(gmsh, path: Path, placement: tuple[np.ndarray, np.ndarray], closed_
         {f: body_of_volume[face_volumes[f][0]] for f in outer_air},
         tuple(exterior),
         tuple(direct),
-        tuple(cover_warnings),
+        tuple(fixed_warnings),
     )
     found = _find_openings(openings, {face.id: face for face in faces}, list(volumes), mesh_of_body, tol)
     if exterior:
@@ -700,7 +696,7 @@ def _analyse(gmsh, path: Path, placement: tuple[np.ndarray, np.ndarray], closed_
     closed = []
     for name, shell_faces in zip(shell_names, shells, strict=True):
         if roles[name] == "air":
-            closed.append(CadClosedShell(name, "air", body_faces[name]))
+            closed.append(CadClosedShell(name, "air", body_faces.get(name, ())))
         else:
             kids = {f for s, k in zip(sheets, sheet_children, strict=True) if s in shell_faces for f in k}
             closed.append(CadClosedShell(name, "exterior", tuple(sorted(kids))))
@@ -711,10 +707,44 @@ def _analyse(gmsh, path: Path, placement: tuple[np.ndarray, np.ndarray], closed_
         found.interfaces,
         (tuple(bbox[:3]), tuple(bbox[3:])),
         found.symmetry,
-        openings.cover_warnings + found.warnings,
+        openings.fixed_warnings + found.warnings,
         tuple(closed),
     )
     return _Model(geometry, volumes, mesh_faces, found.interface_of, face_bodies, openings)
+
+
+def _owned_volumes(gmsh, claims: Mapping[str, list[int]]) -> tuple[dict[str, list[int]], dict[int, str], list[str]]:
+    """Each fragmented volume for one air body, with warnings: ``claims`` are the volumes inside each body.
+
+    A volume inside several bodies belongs to the smallest of them, so a body drawn inside another
+    (a damping fill in a chamber) is cut out of it. Bodies overlapping only in part, and bodies left
+    with no volume of their own, are reported; the latter are left out.
+    """
+    size = {name: sum(gmsh.model.occ.getMass(3, v) for v in vs) for name, vs in claims.items()}
+    holders = defaultdict(list)
+    for name, vs in claims.items():
+        for v in vs:
+            holders[v].append(name)
+    owner = {v: min(names, key=size.__getitem__) for v, names in holders.items()}
+    owned = {name: [v for v in vs if owner[v] == name] for name, vs in claims.items()}
+    warnings = []
+    for name, vs in claims.items():
+        others = sorted({owner[v] for v in vs} - {name}, key=list(claims).index)
+        if not owned[name]:
+            warnings.append(
+                f"Air body '{name}' lies inside {_listed(others)} and was left out; remove it or its duplicate in CAD."
+            )
+            continue
+        for other in others:
+            if not set(owned[other]) <= set(vs):  # Partly outside ``name``: no fill drawn inside it.
+                warnings.append(
+                    f"Air bodies '{name}' and '{other}' overlap; the overlap belongs to '{other}', the smaller."
+                )
+    return {n: vs for n, vs in owned.items() if vs}, owner, warnings
+
+
+def _listed(names) -> str:
+    return ", ".join(f"'{n}'" for n in names)
 
 
 def _guessed_roles(gmsh, step: _Step) -> dict[str, str]:

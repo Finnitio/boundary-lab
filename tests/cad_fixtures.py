@@ -161,13 +161,15 @@ def vented_box(
     shift_mm: tuple[float, float, float] = (0, 0, 0),
     port_radius: float = 10,
     cabinet_name: str = "Cabinet",
+    fill: bool = False,
 ) -> Path:
     """Chamber (100x100x``depth`` mm) joined by a port (r=``port_radius`` mm) to a hole in a cabinet surface.
 
     The cabinet front lies at z=0 and the port mouth fills its hole; the cabinet is 30 mm
     deeper than the chamber. ``covered``
     leaves the cabinet front without the hole, covering the port mouth;
-    ``open_back`` leaves out the cabinet's back face (z=-210 mm).
+    ``open_back`` leaves out the cabinet's back face (z=-210 mm). ``fill`` adds a 40 mm
+    cube "Fill" inside the chamber, overlapping it, as a damping fill is drawn in CAD.
     ``cad_axes`` (forward, up) names the CAD axes that the model's +Z and +Y are
     written along; ``shift_mm`` moves the model before that.
     """
@@ -182,13 +184,14 @@ def vented_box(
             back = [f for f in cabinet if abs(occ.getCenterOfMass(*f)[2] + depth + 30) < 1e-9]
             occ.remove(back, recursive=True)
             cabinet = [f for f in cabinet if f not in back]
-        entities = chamber + port + cabinet
+        fills = _cut_to_symmetry([(3, occ.addBox(-20, -20, -40 - depth / 2, 40, 40, 40))], symmetry) if fill else []
+        entities = chamber + port + fills + cabinet
         if any(shift_mm):
             occ.translate(entities, *shift_mm)
         rotation = CAD_ROTATIONS[cad_axes]
         if rotation:
             occ.rotate(entities, 0, 0, 0, *rotation)
-        return entities, ["Chamber", "Port"] + [cabinet_name] * len(cabinet)
+        return entities, ["Chamber", "Port"] + ["Fill"] * len(fills) + [cabinet_name] * len(cabinet)
 
     def default_names(centre):
         return "Driver" if abs(centre[2] + 20 + depth) < 1e-6 else None

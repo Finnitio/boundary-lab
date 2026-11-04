@@ -896,6 +896,19 @@ def test_an_own_region_body_writes_its_walls_apart_and_its_contact_faces_in_no_g
     }
 
 
+def test_a_fill_drawn_inside_the_chamber_is_its_own_region_and_compiles(plugin, tmp_path):
+    catalog, backend = plugin
+    step = vented_box(tmp_path / "filled.step", fill=True)
+
+    project, _ = generate(backend, make_project(catalog, step, body_roles={"Fill": "own_region"}), tmp_path / "runs")
+
+    doc = project.generator_documents[0].id
+    regions = {r.id: r for r in project.physical_system.regions}
+    assert [g.name for g in regions[f"{doc}/chamber"].volume_groups] == ["Chamber", "Port"]
+    assert [g.name for g in regions[f"{doc}/chamber/Fill"].volume_groups] == ["Fill"]
+    PhysicalSystemCompiler().compile(project.physical_system)
+
+
 def chamber_front_and_port_side(face):
     """The chamber's front around the port, and the port's lateral face: one face of each region."""
     return face.bodies in (("Chamber",), ("Port",)) and abs(face.centre[2] + 0.02) < 0.021 and face.area > 0
