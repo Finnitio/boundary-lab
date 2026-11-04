@@ -410,3 +410,32 @@ def test_interface_radiation_is_an_explicitly_retainable_project_observation(tmp
     prepared = _prepared_request()
     with pytest.raises(ValueError, match="FEM-BEM interfaces"):
         validate_solve_plan(replace(prepared.request, outputs=(output,)))
+
+
+FILLED_TUBE = Path(__file__).parents[1] / "examples" / "filled_tube" / "filled_tube.blab.json"
+FILLED_TUBE_MATERIAL = {
+    "model": "jca",
+    "frame": "rigid",
+    "porosity": 0.98,
+    "flow_resistivity_pa_s_per_m2": 25_000.0,
+    "tortuosity": 1.02,
+    "viscous_characteristic_length_m": 90e-6,
+    "thermal_characteristic_length_m": 180e-6,
+}
+
+
+def test_validation_and_run_provenance_record_each_region_material(tmp_path: Path) -> None:
+    project = headless_module.load_headless_project(FILLED_TUBE)
+    prepared = prepare_headless_solve(project, load_headless_solve_spec(None), backend_id="beat_cpu")
+    expected = [
+        {"region_id": "region:fill", "name": "Porous fill", "kind": "bounded_air", "material": FILLED_TUBE_MATERIAL}
+    ]
+
+    summary = headless_module.validation_summary(project, prepared, backend_id="beat_cpu")
+    HeadlessResultWriter(
+        tmp_path / "run", project=project, prepared=prepared, backend_id="beat_cpu", public_request={}
+    ).finish(status="complete")
+    manifest = json.loads((tmp_path / "run" / "manifest.json").read_text(encoding="utf-8"))
+
+    assert summary["region_materials"] == expected
+    assert manifest["region_materials"] == expected

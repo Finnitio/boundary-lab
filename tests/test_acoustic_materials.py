@@ -82,7 +82,7 @@ def test_region_material_reports_every_issue_with_the_region() -> None:
     )
 
 
-@pytest.mark.parametrize("model", ("jca", "", 3))
+@pytest.mark.parametrize("model", ("biot", "", 3))
 def test_region_material_rejects_unknown_models(model) -> None:
     with pytest.raises(MaterialError, match="unsupported material model"):
         region_material({"model": model}, region_id="region:box", bounded=True)
@@ -92,3 +92,63 @@ def test_region_material_rejects_bulk_loss_outside_bounded_air() -> None:
     assert region_material({"bulk_loss_factor": 0.0}, region_id="region:far", bounded=False) == Material()
     with pytest.raises(MaterialError, match="Region 'region:far' FEM bulk loss requires a bounded-air region"):
         region_material({"bulk_loss_factor": 0.01}, region_id="region:far", bounded=False)
+
+
+# Soft fibrous material, Allard & Atalla 2nd ed. Table 11.2, in SI.
+SOFT_FIBROUS_JCA = {
+    "model": "jca",
+    "frame": "rigid",
+    "porosity": 0.98,
+    "flow_resistivity_pa_s_per_m2": 25_000,
+    "tortuosity": 1.02,
+    "viscous_characteristic_length_m": 90e-6,
+    "thermal_characteristic_length_m": 180e-6,
+}
+
+
+def test_region_material_normalizes_a_rigid_jca_material() -> None:
+    material = region_material(SOFT_FIBROUS_JCA, region_id="region:fill", bounded=True)
+
+    assert material.is_porous
+    assert (material.model, material.frame) == ("jca", "rigid")
+    assert material.to_loss_model() == SOFT_FIBROUS_JCA
+    assert isinstance(material.to_loss_model()["flow_resistivity_pa_s_per_m2"], float)
+    assert region_material({}, region_id="region:box", bounded=True).to_loss_model() == {
+        "model": "air",
+        "bulk_loss_factor": 0.0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    (
+        ({"porosity": 0.0}, r"porosity \(porosity\) must be a finite number > 0 and <= 1\."),
+        ({"porosity": 1.01}, r"porosity \(porosity\) must be a finite number > 0 and <= 1\."),
+        ({"flow_resistivity_pa_s_per_m2": 0.0}, r"flow resistivity .* must be a finite number > 0\."),
+        ({"tortuosity": 0.99}, r"tortuosity \(tortuosity\) must be a finite number >= 1\."),
+        ({"viscous_characteristic_length_m": -1e-6}, r"viscous characteristic length .* > 0\."),
+        ({"thermal_characteristic_length_m": float("nan")}, r"thermal characteristic length .* > 0\."),
+        ({"tortuosity": "1.02"}, r"tortuosity \(tortuosity\) must be a finite number"),
+        ({"porosity": None}, r"porosity \(porosity\) must be a finite number"),
+        ({"frame": "limp"}, r"unsupported JCA frame 'limp'; expected one of: rigid\."),
+        ({"frame": None}, r"unsupported JCA frame None"),
+        ({"bulk_loss_factor": 0.0}, r"FEM bulk loss factor is only available for Air, not JCA\."),
+        ({"static_thermal_permeability_m2": 1e-9}, r"unsupported JCA parameters: static_thermal_permeability_m2\."),
+    ),
+)
+def test_region_material_rejects_invalid_jca_materials(change, message) -> None:
+    with pytest.raises(MaterialError, match=f"^Region 'region:fill' .*{message}"):
+        region_material({**SOFT_FIBROUS_JCA, **change}, region_id="region:fill", bounded=True)
+
+
+def test_region_material_reports_missing_jca_parameters_and_unbounded_regions() -> None:
+    with pytest.raises(MaterialError) as caught:
+        region_material({"model": "jca", "frame": "rigid", "porosity": 0.9}, region_id="region:far", bounded=False)
+
+    assert caught.value.issues == (
+        "Region 'region:far' porous material 'jca' requires a bounded-air region.",
+        "Region 'region:far' JCA material is missing flow resistivity (flow_resistivity_pa_s_per_m2).",
+        "Region 'region:far' JCA material is missing tortuosity (tortuosity).",
+        "Region 'region:far' JCA material is missing viscous characteristic length (viscous_characteristic_length_m).",
+        "Region 'region:far' JCA material is missing thermal characteristic length (thermal_characteristic_length_m).",
+    )

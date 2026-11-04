@@ -16,6 +16,7 @@ from blab.acoustic_impedance import (
     AcousticImpedanceNormalization,
 )
 from blab.acoustic_materials import (
+    BOUNDARY_THERMOVISCOUS_LOSS_KEY,
     WALL_IMPEDANCE_KEY,
     MaterialError,
     boundary_thermoviscous_wall_losses,
@@ -281,6 +282,7 @@ class PhysicalSystemCompiler:
 
         for region in system.regions:
             self._validate_region(region, meshes, issues)
+        porous_models = self._porous_region_models(system)
 
         for boundary in system.boundaries:
             region = regions.get(boundary.region_id)
@@ -297,6 +299,9 @@ class PhysicalSystemCompiler:
             self._validate_json_mapping(
                 boundary.parameters, owner=f"Boundary '{boundary.id}' parameters", issues=issues
             )
+            if region.id in porous_models:
+                self._validate_porous_boundary(boundary, region.id, porous_models[region.id], issues)
+                continue
             try:
                 model = boundary_thermoviscous_wall_losses(boundary.parameters)
                 if model != "off" and (
@@ -360,7 +365,7 @@ class PhysicalSystemCompiler:
                 issues.append(
                     f"Boundary '{boundary.id}' is referenced by an acoustic interface but is not assigned as interface."
                 )
-            if boundary.kind == BoundaryKind.PLANE_WAVE_TUBE_TERMINATION:
+            if boundary.kind == BoundaryKind.PLANE_WAVE_TUBE_TERMINATION and boundary.region_id not in porous_models:
                 region = regions.get(boundary.region_id)
                 if region is not None and region.kind != AcousticRegionKind.BOUNDED_AIR:
                     issues.append(f"Plane-wave tube termination '{boundary.id}' requires a bounded-air FEM region.")
@@ -516,6 +521,39 @@ class PhysicalSystemCompiler:
             issues.extend(exc.issues)
 
     @staticmethod
+    def _porous_region_models(system: PhysicalSystem) -> dict[str, str]:
+        """Map each region with a valid porous material to its model; invalid ones are reported elsewhere."""
+
+        models = {}
+        for region in system.regions:
+            try:
+                material = region_material(
+                    region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
+                )
+            except MaterialError:
+                continue
+            if material.is_porous:
+                models[region.id] = material.model
+        return models
+
+    @staticmethod
+    def _validate_porous_boundary(boundary: Boundary, region_id: str, model: str, issues: list[str]) -> None:
+        """Porous regions allow rigid, moving and interface boundaries; their material owns the losses."""
+
+        treatments = []
+        if boundary.kind == BoundaryKind.PLANE_WAVE_TUBE_TERMINATION:
+            treatments.append("a plane-wave tube termination")
+        if boundary.parameters.get(BOUNDARY_THERMOVISCOUS_LOSS_KEY, "off") != "off":
+            treatments.append("thermoviscous wall losses")
+        if WALL_IMPEDANCE_KEY in boundary.parameters:
+            treatments.append("a wall impedance lining")
+        for treatment in treatments:
+            issues.append(
+                f"Boundary '{boundary.id}' cannot use {treatment} on porous region '{region_id}' ({model.upper()}); "
+                "porous regions allow rigid, moving and interface boundaries without wall treatments."
+            )
+
+    @staticmethod
     def _validate_group_ref(
         group: PhysicalGroupRef,
         *,
@@ -581,8 +619,18 @@ class PhysicalSystemCompiler:
             volume_groups=volume_groups,
             sound_speed_m_per_s=float(region.sound_speed_m_per_s),
             density_kg_per_m3=float(region.density_kg_per_m3),
-            loss_model=dict(region.loss_model),
+            loss_model=self._compiled_loss_model(region),
         )
+
+    @staticmethod
+    def _compiled_loss_model(region: AcousticRegion) -> dict:
+        """Porous materials compile to the normalized engine wire form; Air passes through unchanged
+        so air-only requests stay byte-identical."""
+
+        material = region_material(
+            region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
+        )
+        return material.to_loss_model() if material.is_porous else dict(region.loss_model)
 
     def _compile_boundary(
         self,
@@ -876,15 +924,27 @@ class PhysicalSystemCompiler:
                 PhysicsAssumption(AssumptionStatus.INCLUDED, "Independent reference-excitation transfer basis")
             )
             assumptions.append(PhysicsAssumption(AssumptionStatus.EXCLUDED, "Application DSP and channel synthesis"))
-        if any(
+        materials = [
             region_material(
                 region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
-            ).bulk_loss_factor
-            > 0.0
+            )
             for region in system.regions
-        ):
+        ]
+        if any(material.bulk_loss_factor > 0.0 for material in materials):
             assumptions.append(PhysicsAssumption(AssumptionStatus.INCLUDED, "Homogeneous per-region FEM bulk loss"))
-        else:
+        porous_labels = sorted(
+            {f"{material.model.upper()}, {material.frame} frame" for material in materials if material.is_porous}
+        )
+        if porous_labels:
+            assumptions.append(
+                PhysicsAssumption(
+                    AssumptionStatus.INCLUDED,
+                    "Region-specific acoustic material loss models: porous equivalent fluid ("
+                    + "; ".join(porous_labels)
+                    + ")",
+                )
+            )
+        elif not any(material.bulk_loss_factor > 0.0 for material in materials):
             assumptions.append(
                 PhysicsAssumption(AssumptionStatus.EXCLUDED, "Region-specific acoustic material loss models")
             )

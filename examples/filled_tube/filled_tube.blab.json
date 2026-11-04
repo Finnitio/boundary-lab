@@ -1,0 +1,107 @@
+{
+  "channel_config_by_name": {},
+  "component_channel_by_id": {},
+  "imported_meshes": [
+    {
+      "cleaned_file": null,
+      "enabled": true,
+      "name": "filled_tube",
+      "scale_factor": 0.001,
+      "source_file": "filled_tube.msh",
+      "translation_mm": [0.0, 0.0, 0.0]
+    }
+  ],
+  "physical_system": {
+    "boundaries": [
+      {
+        "group": {"dimension": 2, "mesh_id": "mesh:tube", "name": "Piston", "tag": null},
+        "id": "boundary:piston",
+        "kind": "moving",
+        "name": "Piston",
+        "parameters": {},
+        "region_id": "region:fill"
+      },
+      {
+        "group": {"dimension": 2, "mesh_id": "mesh:tube", "name": "End", "tag": null},
+        "id": "boundary:end",
+        "kind": "rigid",
+        "name": "Rigid end",
+        "parameters": {},
+        "region_id": "region:fill"
+      },
+      {
+        "group": {"dimension": 2, "mesh_id": "mesh:tube", "name": "Walls", "tag": null},
+        "id": "boundary:walls",
+        "kind": "rigid",
+        "name": "Tube walls",
+        "parameters": {},
+        "region_id": "region:fill"
+      }
+    ],
+    "components": [
+      {
+        "boundary_ids": ["boundary:piston"],
+        "id": "component:piston",
+        "kind": "ideal_velocity_source",
+        "name": "Piston",
+        "parameters": {"motion_profile": "uniform"}
+      }
+    ],
+    "excitation_ports": [
+      {
+        "component_id": "component:piston",
+        "id": "excitation:piston",
+        "kind": "normal_velocity",
+        "name": "Piston unit normal velocity"
+      }
+    ],
+    "id": "system:filled-tube",
+    "interfaces": [],
+    "meshes": [
+      {
+        "file": "filled_tube.msh",
+        "id": "mesh:tube",
+        "name": "filled_tube",
+        "purpose": "fem_volume",
+        "scale_to_m": 0.001,
+        "translation_m": [0.0, 0.0, 0.0]
+      }
+    ],
+    "metadata": {
+      "description": "Tube completely filled with soft fibrous material (Allard & Atalla 2nd ed., Table 11.2), JCA rigid frame."
+    },
+    "model_version": 1,
+    "name": "Filled tube (JCA)",
+    "regions": [
+      {
+        "density_kg_per_m3": 1.21,
+        "id": "region:fill",
+        "kind": "bounded_air",
+        "loss_model": {
+          "model": "jca",
+          "frame": "rigid",
+          "porosity": 0.98,
+          "flow_resistivity_pa_s_per_m2": 25000.0,
+          "tortuosity": 1.02,
+          "viscous_characteristic_length_m": 9e-05,
+          "thermal_characteristic_length_m": 0.00018
+        },
+        "mesh_ids": ["mesh:tube"],
+        "name": "Porous fill",
+        "sound_speed_m_per_s": 343.0,
+        "volume_groups": [{"dimension": 3, "mesh_id": "mesh:tube", "name": "Tube", "tag": null}]
+      }
+    ]
+  },
+  "project_preferences": {
+    "freq_count": 20,
+    "freq_max_hz": 2000,
+    "freq_min_hz": 100,
+    "polar_angle_step_deg": 5.0,
+    "polar_observation_distance_m": 1.0,
+    "spherical_sampling_enabled": false
+  },
+  "schema_version": 10,
+  "stitch_exterior_meshes": false,
+  "symmetry": "off"
+}

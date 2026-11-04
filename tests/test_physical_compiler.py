@@ -521,8 +521,80 @@ def test_compiler_reads_explicit_air_material_and_rejects_unknown_models() -> No
     assert interior.loss_model == {"model": "air", "bulk_loss_factor": 0.01}
     assert "Homogeneous per-region FEM bulk loss" in {item.statement for item in compiled.assumptions}
 
-    with pytest.raises(PhysicalModelCompileError, match="unsupported material model 'jca'"):
-        PhysicalSystemCompiler().compile(with_loss_model({"model": "jca"}))
+    with pytest.raises(PhysicalModelCompileError, match="unsupported material model 'biot'"):
+        PhysicalSystemCompiler().compile(with_loss_model({"model": "biot"}))
+
+
+# Soft fibrous material, Allard & Atalla 2nd ed. Table 11.2, rigid frame, SI.
+SOFT_FIBROUS_JCA = {
+    "model": "jca",
+    "frame": "rigid",
+    "porosity": 0.98,
+    "flow_resistivity_pa_s_per_m2": 25_000.0,
+    "tortuosity": 1.02,
+    "viscous_characteristic_length_m": 90e-6,
+    "thermal_characteristic_length_m": 180e-6,
+}
+
+
+def _with_porous_interior(system: PhysicalSystem, *, boundary_parameters=None) -> PhysicalSystem:
+    boundary_parameters = boundary_parameters or {}
+    return replace(
+        system,
+        regions=tuple(
+            replace(region, loss_model=dict(SOFT_FIBROUS_JCA)) if region.id == "region:interior" else region
+            for region in system.regions
+        ),
+        boundaries=tuple(
+            replace(boundary, parameters=boundary_parameters[boundary.id])
+            if boundary.id in boundary_parameters
+            else boundary
+            for boundary in system.boundaries
+        ),
+    )
+
+
+def test_compiler_accepts_porous_region_with_rigid_moving_and_interface_boundaries() -> None:
+    system = _with_porous_interior(_fixture_system())
+    system = replace(
+        system,
+        regions=tuple(
+            replace(region, loss_model={**region.loss_model, "flow_resistivity_pa_s_per_m2": 25_000})
+            if region.id == "region:interior"
+            else region
+            for region in system.regions
+        ),
+    )
+    compiled = PhysicalSystemCompiler().compile(system)
+
+    interior = next(region for region in compiled.regions if region.id == "region:interior")
+    assert interior.loss_model == SOFT_FIBROUS_JCA
+    assert isinstance(interior.loss_model["flow_resistivity_pa_s_per_m2"], float)
+    assumptions = {(item.status, item.statement) for item in compiled.assumptions}
+    assert (
+        AssumptionStatus.INCLUDED,
+        "Region-specific acoustic material loss models: porous equivalent fluid (JCA, rigid frame)",
+    ) in assumptions
+    assert (AssumptionStatus.EXCLUDED, "Region-specific acoustic material loss models") not in assumptions
+
+
+@pytest.mark.parametrize(
+    ("parameters", "treatment"),
+    (
+        ({"thermoviscous_wall_losses": "thin_boundary_layer"}, "thermoviscous wall losses"),
+        (miki_wall_impedance_parameters(), "a wall impedance lining"),
+    ),
+)
+def test_compiler_rejects_wall_treatments_on_porous_region_boundaries(parameters, treatment) -> None:
+    system = _with_porous_interior(_fixture_system(), boundary_parameters={"boundary:wall": parameters})
+
+    with pytest.raises(PhysicalModelCompileError) as caught:
+        PhysicalSystemCompiler().compile(system)
+
+    assert (
+        f"Boundary 'boundary:wall' cannot use {treatment} on porous region 'region:interior' (JCA); "
+        "porous regions allow rigid, moving and interface boundaries without wall treatments."
+    ) in caught.value.issues
 
 
 def test_coupled_backend_rejects_invalid_region_materials_before_starting_julia() -> None:
@@ -546,8 +618,8 @@ def test_coupled_backend_rejects_invalid_region_materials_before_starting_julia(
     with pytest.raises(ValueError, match=f"Region '{unbounded.id}' FEM bulk loss requires a bounded-air region"):
         backend.create_system_session(request(unbounded.id, {"bulk_loss_factor": 0.01}))
     interior = next(region for region in compiled.regions if region.kind == AcousticRegionKind.BOUNDED_AIR)
-    with pytest.raises(ValueError, match=f"Region '{interior.id}' uses unsupported material model 'jca'"):
-        backend.create_system_session(request(interior.id, {"model": "jca"}))
+    with pytest.raises(ValueError, match=f"Region '{interior.id}' uses unsupported material model 'biot'"):
+        backend.create_system_session(request(interior.id, {"model": "biot"}))
 
 
 def test_coupled_backend_accepts_region_fem_bulk_loss_and_wall_impedance() -> None:

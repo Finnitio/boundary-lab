@@ -14,13 +14,14 @@ from typing import Any, Callable, Iterable
 
 import numpy as np
 
+from blab.acoustic_materials import region_material
 from blab.generators.base import generated_mesh_id
 from blab.generators.registry import restore_generator_document
 from blab.generators.resources import active_assembly_system, generated_mesh_entries
 from blab.live import build_log_frequencies
 from blab.observation_planes import observation_planes_from_payload
 from blab.phasor import SOLVER_PHASOR_CONVENTION
-from blab.physical_model import PhysicalSolveKind, PhysicalSystem, physical_system_from_dict
+from blab.physical_model import AcousticRegionKind, PhysicalSolveKind, PhysicalSystem, physical_system_from_dict
 from blab.project.io import PROJECT_SCHEMA_VERSION, read_project_file
 from blab.project.model import ProjectPreferencesState, generator_documents_from_payload, generator_mesh_name
 from blab.solve_results import (
@@ -383,6 +384,7 @@ def validation_summary(
         "excitation_port_ids": list(request.excitation_port_ids),
         "output_ids": [output.id for output in request.outputs],
         "meshes": mesh_entries,
+        "region_materials": _region_material_entries(request.compiled_system),
         "assumptions": [
             {"status": item.status.value, "statement": item.statement} for item in request.compiled_system.assumptions
         ],
@@ -443,6 +445,7 @@ class HeadlessResultWriter:
             "solver_options": _json_safe(prepared.request.solver_options),
             "engine_runs": [],
             "meshes": _mesh_manifest_entries(prepared.request.compiled_system),
+            "region_materials": _region_material_entries(prepared.request.compiled_system),
             "completion_mask": self.completion.tolist(),
             "results": self.results,
         }
@@ -830,6 +833,22 @@ def _mesh_manifest_entries(system) -> list[dict[str, Any]]:
             }
         )
     return entries
+
+
+def _region_material_entries(system) -> list[dict[str, Any]]:
+    """Each region's normalized material (explicit model, SI parameters) for reproducible runs."""
+
+    return [
+        {
+            "region_id": region.id,
+            "name": region.name,
+            "kind": region.kind.value,
+            "material": region_material(
+                region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
+            ).to_loss_model(),
+        }
+        for region in system.regions
+    ]
 
 
 def _command_available(command: str) -> bool:
