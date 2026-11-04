@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from blab.fem_topology import selected_tetrahedra
+from blab.fem_topology import selected_tetrahedra, tetrahedron_element_order
 from blab.mesh_data import read_resource_mesh
 from blab.physical_model import AcousticRegionKind, CompiledPhysicalSystem
 from blab.solve_results.model import FEM_VOLUME_DOMAIN_ID, ResultDomain
@@ -56,7 +56,7 @@ def fem_volume_result_domain(system: CompiledPhysicalSystem, *, symmetry: str = 
         region_tetrahedra = selected_tetrahedra(mesh, selected_tags)
         if not region_tetrahedra.size:
             raise ValueError(f"Bounded region {region.id!r} contains no selected tetrahedra.")
-        region_order = 2 if region_tetrahedra.shape[1] == 10 else 1
+        region_order = tetrahedron_element_order(region_tetrahedra)
         if element_order is None:
             element_order = region_order
         elif region_order != element_order:

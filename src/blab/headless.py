@@ -359,7 +359,7 @@ def prepare_headless_solve(
         solver_options=options,
     )
     # A local BEAT backend is known before submission; a remote server selects its own.
-    engine_backend = backend_id.removeprefix("beat_")
+    engine_backend = _engine_backend_name(backend_id)
     validate_solve_plan(request, bem_backend=engine_backend if engine_backend in BEAT_ENGINE_BACKENDS else None)
     return replace(prepared, request=request, result_domains=tuple(domains))
 
@@ -583,7 +583,7 @@ def run_headless_solve(
     session = None
     try:
         backend = backend or PhysicalSystemProductionBackend(
-            bem_backend=backend_id.removeprefix("beat_"),
+            bem_backend=_engine_backend_name(backend_id),
             precision=prepared.request.solver_options.get("precision", "float32"),
             julia_executable=julia_executable,
             julia_threads=julia_threads,
@@ -840,6 +840,12 @@ def _mesh_manifest_entries(system) -> list[dict[str, Any]]:
             }
         )
     return entries
+
+
+def _engine_backend_name(backend_id: str) -> str:
+    """The BEAT Engine backend name (``cpu``, ``cuda``, ...) of a Boundary Lab ``beat_*`` backend id."""
+
+    return backend_id.removeprefix("beat_")
 
 
 def _warning_entries(system) -> list[dict[str, Any]]:

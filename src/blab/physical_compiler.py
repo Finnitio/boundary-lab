@@ -18,6 +18,7 @@ from blab.acoustic_impedance import (
 )
 from blab.acoustic_materials import (
     BOUNDARY_THERMOVISCOUS_LOSS_KEY,
+    MATERIAL_MODEL_LABELS,
     WALL_IMPEDANCE_KEY,
     MaterialError,
     boundary_thermoviscous_wall_losses,
@@ -41,6 +42,7 @@ from blab.fem_topology import (
     selected_tetrahedra,
     selected_volume_exterior_faces,
     selected_volume_surface_tags,
+    tetrahedron_element_order,
     triangle_tags_by_face,
 )
 from blab.interface_conform import InterfaceConformError, build_conforming_interface_map
@@ -581,7 +583,7 @@ class PhysicalSystemCompiler:
                 )
                 if not len(tetrahedra):
                     continue
-                element_order = 2 if tetrahedra.shape[1] == 10 else 1
+                element_order = tetrahedron_element_order(tetrahedra)
                 edge_m = mean_tetrahedron_edge_length(np.asarray(mesh.points) * float(resource.scale_to_m), tetrahedra)
                 needed_m = porous_mesh_edge_length_m(wavelength_m, element_order)
                 if edge_m <= needed_m:
@@ -591,7 +593,7 @@ class PhysicalSystemCompiler:
                     ValidationWarning(
                         code="porous_mesh_too_coarse",
                         region_id=region.id,
-                        message=f"Region '{region.id}' {material.model.upper()} mesh on '{mesh_id}' is too coarse "
+                        message=f"Region '{region.id}' {MATERIAL_MODEL_LABELS[material.model]} mesh on '{mesh_id}' is too coarse "
                         f"at {freq_max_hz:g} Hz: mean P{element_order} tetrahedron edge {edge_m * 1e3:.2f} mm, needed "
                         f"<= {needed_m * 1e3:.2f} mm ({elements} elements per porous wavelength "
                         f"{wavelength_m * 1e3:.1f} mm, about {target_error:.0%} input-impedance error otherwise). "
@@ -627,7 +629,7 @@ class PhysicalSystemCompiler:
             treatments.append("a wall impedance lining")
         for treatment in treatments:
             issues.append(
-                f"Boundary '{boundary.id}' cannot use {treatment} on porous region '{region_id}' ({model.upper()}); "
+                f"Boundary '{boundary.id}' cannot use {treatment} on porous region '{region_id}' ({MATERIAL_MODEL_LABELS[model]}); "
                 "porous regions allow rigid, moving and interface boundaries without wall treatments."
             )
 
@@ -1080,7 +1082,11 @@ class PhysicalSystemCompiler:
         if any(material.bulk_loss_factor > 0.0 for material in materials):
             assumptions.append(PhysicsAssumption(AssumptionStatus.INCLUDED, "Homogeneous per-region FEM bulk loss"))
         porous_labels = sorted(
-            {f"{material.model.upper()}, {material.frame} frame" for material in materials if material.is_porous}
+            {
+                f"{MATERIAL_MODEL_LABELS[material.model]}, {material.frame} frame"
+                for material in materials
+                if material.is_porous
+            }
         )
         if porous_labels:
             assumptions.append(

@@ -21,6 +21,8 @@ MATERIAL_MODEL_JCA = "jca"
 MATERIAL_MODEL_JCAL = "jcal"
 MATERIAL_FRAME_RIGID = "rigid"
 MATERIAL_FRAME_LIMP = "limp"
+# Display names of the material models, shared by messages, assumptions and the Material dialog.
+MATERIAL_MODEL_LABELS = {MATERIAL_MODEL_AIR: "Air", MATERIAL_MODEL_JCA: "JCA", MATERIAL_MODEL_JCAL: "JCAL"}
 
 
 @dataclass(frozen=True)
@@ -72,7 +74,6 @@ REGION_MATERIAL_FRAMES: dict[str, tuple[str, ...]] = {
 }
 POROUS_MATERIAL_MODELS = frozenset(set(REGION_MATERIAL_MODELS) - {MATERIAL_MODEL_AIR})
 BOUNDARY_THERMOVISCOUS_LOSS_KEY = "thermoviscous_wall_losses"
-FEM_BULK_LOSS_FACTOR_OPTIONS = (0.0, 0.002, 0.005, 0.01, 0.02, 0.05)
 WALL_IMPEDANCE_KEY = "wall_impedance"
 WALL_IMPEDANCE_MODEL_MIKI = "miki"
 
@@ -273,7 +274,7 @@ def _porous_material(loss_model: Mapping[str, Any], model: str, *, owner: str, b
     frame = loss_model.get(REGION_MATERIAL_FRAME_KEY)
     if not isinstance(frame, str) or frame not in REGION_MATERIAL_FRAMES:
         issues.append(
-            f"{owner} uses unsupported {model.upper()} frame {frame!r}; expected one of: "
+            f"{owner} uses unsupported {MATERIAL_MODEL_LABELS[model]} frame {frame!r}; expected one of: "
             + ", ".join(sorted(REGION_MATERIAL_FRAMES))
             + "."
         )
@@ -282,7 +283,7 @@ def _porous_material(loss_model: Mapping[str, Any], model: str, *, owner: str, b
         frame_keys = REGION_MATERIAL_FRAMES[frame]
     keys = (*REGION_MATERIAL_MODELS[model], *frame_keys)
     if REGION_BULK_LOSS_FACTOR_KEY in loss_model:
-        issues.append(f"{owner} FEM bulk loss factor is only available for Air, not {model.upper()}.")
+        issues.append(f"{owner} FEM bulk loss factor is only available for Air, not {MATERIAL_MODEL_LABELS[model]}.")
     preset_id = loss_model.get(REGION_MATERIAL_PRESET_KEY, MATERIAL_PRESET_CUSTOM)
     if not isinstance(preset_id, str):
         issues.append(f"{owner} material preset must be a preset name or '{MATERIAL_PRESET_CUSTOM}'.")
@@ -295,16 +296,20 @@ def _porous_material(loss_model: Mapping[str, Any], model: str, *, owner: str, b
     }
     unknown = sorted(set(loss_model) - known)
     if unknown:
-        issues.append(f"{owner} uses unsupported {model.upper()} parameters: " + ", ".join(unknown) + ".")
+        issues.append(
+            f"{owner} uses unsupported {MATERIAL_MODEL_LABELS[model]} parameters: " + ", ".join(unknown) + "."
+        )
     parameters: list[tuple[str, float]] = []
     for key in keys:
         spec = POROUS_MATERIAL_PARAMETERS[key]
         if key not in loss_model:
-            issues.append(f"{owner} {model.upper()} material is missing {spec.label} ({key}).")
+            issues.append(f"{owner} {MATERIAL_MODEL_LABELS[model]} material is missing {spec.label} ({key}).")
             continue
         value = _finite_number(loss_model[key])
         if value is None or not spec.accepts(value):
-            issues.append(f"{owner} {model.upper()} {spec.label} ({key}) must be a finite number {spec.describe()}.")
+            issues.append(
+                f"{owner} {MATERIAL_MODEL_LABELS[model]} {spec.label} ({key}) must be a finite number {spec.describe()}."
+            )
             continue
         parameters.append((key, value))
     if issues:
@@ -327,7 +332,7 @@ def region_material_warnings(material: Material, *, region_id: str) -> tuple[Val
         ValidationWarning(
             code="porous_thermal_length_below_viscous_length",
             region_id=region_id,
-            message=f"Region '{region_id}' {material.model.upper()} thermal characteristic length "
+            message=f"Region '{region_id}' {MATERIAL_MODEL_LABELS[material.model]} thermal characteristic length "
             f"({thermal * 1e6:g} um) is smaller than its viscous characteristic length ({viscous * 1e6:g} um); "
             "measured data usually has thermal >= viscous. Check the values.",
         ),
@@ -363,7 +368,10 @@ def porous_wavelength_m(
     alpha = parameters["tortuosity"]
     viscous_length = parameters["viscous_characteristic_length_m"]
     thermal_length = parameters["thermal_characteristic_length_m"]
-    k0_thermal = parameters.get("static_thermal_permeability_m2", phi * thermal_length**2 / 8.0)
+    k0_thermal = parameters.get(
+        "static_thermal_permeability_m2",
+        jcal_static_thermal_permeability(porosity=phi, thermal_characteristic_length_m=thermal_length),
+    )
     nu = eta / rho0
     q0 = eta / parameters["flow_resistivity_pa_s_per_m2"]
     g = cmath.sqrt(1.0 + (2.0 * alpha * q0 / (phi * viscous_length)) ** 2 * jw / nu)

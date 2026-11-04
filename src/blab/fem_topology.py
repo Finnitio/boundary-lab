@@ -112,6 +112,12 @@ def selected_tetrahedra(mesh: meshio.Mesh, selected_volume_tags: Iterable[int]) 
     return np.vstack(selected)
 
 
+def tetrahedron_element_order(tetrahedra: np.ndarray) -> int:
+    """Return the FEM element order of tetrahedra from ``selected_tetrahedra``: 2 for 10-node, else 1."""
+
+    return 2 if np.asarray(tetrahedra).shape[1] == 10 else 1
+
+
 def mean_tetrahedron_edge_length(points: np.ndarray, tetrahedra: np.ndarray) -> float:
     """Return the mean corner-to-corner edge length of tetrahedra, repeated edges included."""
 
@@ -132,5 +138,6 @@ __all__ = [
     "selected_tetrahedra",
     "selected_volume_exterior_faces",
     "selected_volume_surface_tags",
+    "tetrahedron_element_order",
     "triangle_tags_by_face",
 ]

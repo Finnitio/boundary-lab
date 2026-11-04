@@ -22,12 +22,16 @@ from blab.acoustic_materials import (
     MATERIAL_MODEL_AIR,
     MATERIAL_MODEL_JCA,
     MATERIAL_MODEL_JCAL,
+    MATERIAL_MODEL_LABELS,
     MATERIAL_PRESET_CUSTOM,
     MATERIAL_PRESETS,
     POROUS_MATERIAL_MODELS,
     REGION_BULK_LOSS_FACTOR_KEY,
+    REGION_MATERIAL_FRAME_KEY,
     REGION_MATERIAL_FRAMES,
+    REGION_MATERIAL_MODEL_KEY,
     REGION_MATERIAL_MODELS,
+    REGION_MATERIAL_PRESET_KEY,
     MaterialError,
     jcal_static_thermal_permeability,
     material_preset,
@@ -36,7 +40,6 @@ from blab.acoustic_materials import (
 )
 from blab.ui.numeric_locale import format_decimal_number, parse_decimal_number
 
-_MODEL_LABELS = {MATERIAL_MODEL_AIR: "Air", MATERIAL_MODEL_JCA: "JCA", MATERIAL_MODEL_JCAL: "JCAL"}
 _FRAME_LABELS = {MATERIAL_FRAME_RIGID: "Rigid", MATERIAL_FRAME_LIMP: "Limp"}
 
 # (loss-model key, label, literature unit, display value per SI value)
@@ -65,7 +68,7 @@ def region_material_label(loss_model: Mapping[str, Any] | None) -> str:
     if not material.is_porous:
         return "Air" if material.bulk_loss_factor == 0.0 else f"Air – loss {material.bulk_loss_factor:g}"
     preset = material_preset(material.preset or MATERIAL_PRESET_CUSTOM)
-    return f"{_MODEL_LABELS[material.model]} – {'Custom' if preset is None else preset.name}"
+    return f"{MATERIAL_MODEL_LABELS[material.model]} – {'Custom' if preset is None else preset.name}"
 
 
 class RegionMaterialDialog(QDialog):
@@ -87,7 +90,7 @@ class RegionMaterialDialog(QDialog):
         self._prefilled_static_thermal_permeability: float | None = None
 
         self.model_combo = QComboBox()
-        for model, label in _MODEL_LABELS.items():
+        for model, label in MATERIAL_MODEL_LABELS.items():
             self.model_combo.addItem(label, model)
         self.preset_combo = QComboBox()
         for preset in MATERIAL_PRESETS:
@@ -143,9 +146,9 @@ class RegionMaterialDialog(QDialog):
         try:
             material = region_material(loss_model, region_id=self._region_name, bounded=True)
         except MaterialError:
-            model = loss_model.get("model")
+            model = loss_model.get(REGION_MATERIAL_MODEL_KEY)
             self._select(self.model_combo, model if model in REGION_MATERIAL_MODELS else MATERIAL_MODEL_JCA)
-            self._select(self.frame_combo, loss_model.get("frame", MATERIAL_FRAME_RIGID))
+            self._select(self.frame_combo, loss_model.get(REGION_MATERIAL_FRAME_KEY, MATERIAL_FRAME_RIGID))
             self._select(self.preset_combo, MATERIAL_PRESET_CUSTOM)
             return
         if material.is_porous:
@@ -221,7 +224,10 @@ class RegionMaterialDialog(QDialog):
     def _model_changed(self, _index: int) -> None:
         if self.model_combo.currentData() == MATERIAL_MODEL_JCAL:
             self._prefill_static_thermal_permeability(keep_entered=True)
-        if self._values.get(REGION_BULK_LOSS_FACTOR_KEY) is None and self.model_combo.currentData() == "air":
+        if (
+            self._values.get(REGION_BULK_LOSS_FACTOR_KEY) is None
+            and self.model_combo.currentData() == MATERIAL_MODEL_AIR
+        ):
             self._set_value(REGION_BULK_LOSS_FACTOR_KEY, 0.0)
         self._refresh()
 
@@ -283,10 +289,10 @@ class RegionMaterialDialog(QDialog):
         if model not in POROUS_MATERIAL_MODELS:
             return values
         return {
-            "model": model,
-            "frame": str(self.frame_combo.currentData()),
+            REGION_MATERIAL_MODEL_KEY: model,
+            REGION_MATERIAL_FRAME_KEY: str(self.frame_combo.currentData()),
             **values,
-            "preset": str(self.preset_combo.currentData()),
+            REGION_MATERIAL_PRESET_KEY: str(self.preset_combo.currentData()),
         }
 
     def loss_model(self) -> dict[str, Any]:
