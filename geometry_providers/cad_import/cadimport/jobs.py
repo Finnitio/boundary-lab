@@ -46,7 +46,10 @@ def _run(job, output, *, cancelled, started=lambda process: None, elapsed=lambda
     """Run ``worker.py`` on ``job`` in ``output`` and return its JSON result; ``cancelled()`` is polled and
     terminates it."""
     job_path = output / "job.json"
-    job_path.write_text(json.dumps(job | {"blab_path": BLAB_PATH, "plugin_path": PLUGIN_PATH, "output": str(output)}, indent=2), encoding="utf-8")
+    job_path.write_text(
+        json.dumps(job | {"blab_path": BLAB_PATH, "plugin_path": PLUGIN_PATH, "output": str(output)}, indent=2),
+        encoding="utf-8",
+    )
     log_path = output / "meshing.log"
     with log_path.open("w", encoding="utf-8") as log:
         process = subprocess.Popen(
