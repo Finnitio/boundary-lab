@@ -230,6 +230,18 @@ class PhysicsAssumption:
 
 
 @dataclass(frozen=True)
+class ValidationWarning:
+    """A validation finding that does not block a solve; ``code`` is stable for automated diagnosis."""
+
+    code: str
+    message: str
+    region_id: str | None = None
+
+    def as_dict(self) -> dict[str, str | None]:
+        return {"code": self.code, "region_id": self.region_id, "message": self.message}
+
+
+@dataclass(frozen=True)
 class CompiledPhysicalSystem:
     id: str
     name: str
@@ -243,6 +255,8 @@ class CompiledPhysicalSystem:
     source_model_version: int = PHYSICAL_MODEL_VERSION
     contract_version: int = COMPILED_SYSTEM_VERSION
     metadata: dict[str, JsonValue] = field(default_factory=dict)
+    # Validation-time findings; not part of the engine wire contract.
+    warnings: tuple[ValidationWarning, ...] = ()
 
 
 def physical_system_to_dict(system: PhysicalSystem) -> dict[str, Any]:

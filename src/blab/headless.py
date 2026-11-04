@@ -385,6 +385,7 @@ def validation_summary(
         "output_ids": [output.id for output in request.outputs],
         "meshes": mesh_entries,
         "region_materials": _region_material_entries(request.compiled_system),
+        "warnings": [warning.as_dict() for warning in request.compiled_system.warnings],
         "assumptions": [
             {"status": item.status.value, "statement": item.statement} for item in request.compiled_system.assumptions
         ],

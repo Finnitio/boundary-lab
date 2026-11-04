@@ -39,10 +39,11 @@ def equivalent_fluid(
 ) -> EquivalentFluid:
     """Johnson density (Eqs. 5.50/5.52) and simplified Lafarge bulk modulus (Eqs. 5.51/5.53).
 
-    JCA uses the static thermal permeability k0' = phi Lambda'^2 / 8 (Eqs. 5.54/5.55).
+    JCAL reads the static thermal permeability k0'; JCA uses k0' = phi Lambda'^2 / 8 (Eqs. 5.54/5.55).
+    A limp frame replaces the rigid-frame equivalent density by Panneton's approximation (Eq. 11.55).
     """
 
-    if parameters["model"] != "jca" or parameters["frame"] != "rigid":
+    if parameters["model"] not in ("jca", "jcal") or parameters["frame"] not in ("rigid", "limp"):
         raise NotImplementedError(f"No reference for {parameters['model']} with a {parameters['frame']} frame.")
     rho0, j = density_kg_per_m3, 1j
     omega = 2.0 * math.pi * frequency_hz
@@ -65,13 +66,19 @@ def equivalent_fluid(
             * cmath.sqrt(1.0 + 4.0 * j * alpha**2 * eta * rho0 * omega / (sigma**2 * viscous_length**2 * phi**2))
         )
     )
-    k0 = phi * thermal_length**2 / 8.0
+    k0 = (
+        parameters["static_thermal_permeability_m2"] if parameters["model"] == "jcal" else phi * thermal_length**2 / 8.0
+    )
     nu_thermal = eta / (rho0 * prandtl)
     alpha_thermal = 1.0 + nu_thermal * phi / (j * omega * k0) * cmath.sqrt(
         1.0 + 4.0 * j * omega * k0**2 / (nu_thermal * thermal_length**2 * phi**2)
     )
     bulk = gamma * p0 / (gamma - (gamma - 1.0) / alpha_thermal)
-    return EquivalentFluid(density_kg_per_m3=density / phi, bulk_modulus_pa=bulk / phi)
+    density_eq = density / phi
+    if parameters["frame"] == "limp":
+        total = parameters["frame_density_kg_per_m3"] + phi * rho0
+        density_eq = (total * density_eq - rho0**2) / (total + density_eq - 2.0 * rho0)
+    return EquivalentFluid(density_kg_per_m3=density_eq, bulk_modulus_pa=bulk / phi)
 
 
 def closed_tube_input_impedance(fluid: EquivalentFluid, frequency_hz: float, length_m: float) -> complex:

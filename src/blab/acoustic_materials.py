@@ -6,12 +6,16 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from blab.physical_model import ValidationWarning
+
 REGION_BULK_LOSS_FACTOR_KEY = "bulk_loss_factor"
 REGION_MATERIAL_MODEL_KEY = "model"
 REGION_MATERIAL_FRAME_KEY = "frame"
 MATERIAL_MODEL_AIR = "air"
 MATERIAL_MODEL_JCA = "jca"
+MATERIAL_MODEL_JCAL = "jcal"
 MATERIAL_FRAME_RIGID = "rigid"
+MATERIAL_FRAME_LIMP = "limp"
 
 
 @dataclass(frozen=True)
@@ -36,13 +40,14 @@ class MaterialParameter:
 # (``beat_contract.REGION_MATERIAL_MODELS``/``REGION_MATERIAL_FRAMES``/``_POROUS_PARAMETERS``):
 # each model lists the keys it accepts besides ``model`` (and ``frame``), and each frame of
 # a porous model lists the parameters it adds. A loss model without ``model`` is legacy Air.
-# Further models (JCAL) and frames (limp) are added to these tables.
 POROUS_MATERIAL_PARAMETERS: dict[str, MaterialParameter] = {
     "porosity": MaterialParameter("porosity", 0.0, high=1.0),
     "flow_resistivity_pa_s_per_m2": MaterialParameter("flow resistivity", 0.0),
     "tortuosity": MaterialParameter("tortuosity", 1.0, low_inclusive=True),
     "viscous_characteristic_length_m": MaterialParameter("viscous characteristic length", 0.0),
     "thermal_characteristic_length_m": MaterialParameter("thermal characteristic length", 0.0),
+    "static_thermal_permeability_m2": MaterialParameter("static thermal permeability", 0.0),
+    "frame_density_kg_per_m3": MaterialParameter("frame density", 0.0),
 }
 _JCA_PARAMETERS = (
     "porosity",
@@ -54,8 +59,12 @@ _JCA_PARAMETERS = (
 REGION_MATERIAL_MODELS: dict[str, tuple[str, ...]] = {
     MATERIAL_MODEL_AIR: (REGION_BULK_LOSS_FACTOR_KEY,),
     MATERIAL_MODEL_JCA: _JCA_PARAMETERS,
+    MATERIAL_MODEL_JCAL: (*_JCA_PARAMETERS, "static_thermal_permeability_m2"),
 }
-REGION_MATERIAL_FRAMES: dict[str, tuple[str, ...]] = {MATERIAL_FRAME_RIGID: ()}
+REGION_MATERIAL_FRAMES: dict[str, tuple[str, ...]] = {
+    MATERIAL_FRAME_RIGID: (),
+    MATERIAL_FRAME_LIMP: ("frame_density_kg_per_m3",),
+}
 POROUS_MATERIAL_MODELS = frozenset(set(REGION_MATERIAL_MODELS) - {MATERIAL_MODEL_AIR})
 BOUNDARY_THERMOVISCOUS_LOSS_KEY = "thermoviscous_wall_losses"
 FEM_BULK_LOSS_FACTOR_OPTIONS = (0.0, 0.002, 0.005, 0.01, 0.02, 0.05)
@@ -175,6 +184,25 @@ def _porous_material(loss_model: Mapping[str, Any], model: str, *, owner: str, b
     if issues:
         raise MaterialError(tuple(issues))
     return Material(model=model, frame=frame, parameters=tuple(parameters))
+
+
+def region_material_warnings(material: Material, *, region_id: str) -> tuple[ValidationWarning, ...]:
+    """Return the findings that make a valid Material suspicious without rejecting it."""
+
+    parameters = dict(material.parameters)
+    viscous = parameters.get("viscous_characteristic_length_m")
+    thermal = parameters.get("thermal_characteristic_length_m")
+    if viscous is None or thermal is None or thermal >= viscous:
+        return ()
+    return (
+        ValidationWarning(
+            code="porous_thermal_length_below_viscous_length",
+            region_id=region_id,
+            message=f"Region '{region_id}' {material.model.upper()} thermal characteristic length "
+            f"({thermal * 1e6:g} um) is smaller than its viscous characteristic length ({viscous * 1e6:g} um); "
+            "measured data usually has thermal >= viscous. Check the values.",
+        ),
+    )
 
 
 def _finite_number(raw: Any) -> float | None:

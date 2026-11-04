@@ -1,4 +1,5 @@
 import json
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,6 +25,7 @@ from blab.physical_model import (
 )
 from blab.project.model import ProjectPreferencesState
 from blab.project_cli import _build_arg_parser
+from blab.project_cli import main as project_main
 from blab.solve_results import ResultDomain
 from blab.solvers.coupled_backend import validate_solve_plan
 from blab.system_contract import OutputRequest, QuantityResult, SystemFrequencyResult, SystemSolveRequest
@@ -439,3 +441,27 @@ def test_validation_and_run_provenance_record_each_region_material(tmp_path: Pat
 
     assert summary["region_materials"] == expected
     assert manifest["region_materials"] == expected
+
+
+def test_validate_json_reports_material_warnings_per_region(tmp_path: Path, capsys) -> None:
+    project = json.loads(FILLED_TUBE.read_text(encoding="utf-8"))
+    project["physical_system"]["regions"][0]["loss_model"]["thermal_characteristic_length_m"] = 60e-6
+    shutil.copy(FILLED_TUBE.with_suffix("").with_suffix(".msh"), tmp_path)
+    path = tmp_path / FILLED_TUBE.name
+    path.write_text(json.dumps(project), encoding="utf-8")
+
+    capsys.readouterr()
+    project_main(["validate", str(path), "--backend", "beat_cpu", "--json"], prog="blab project")
+    summary = json.loads(capsys.readouterr().out)
+
+    assert summary["valid"]
+    assert [(item["code"], item["region_id"]) for item in summary["warnings"]] == [
+        ("porous_thermal_length_below_viscous_length", "region:fill")
+    ]
+
+
+def test_validate_json_lists_no_warnings_for_a_regular_material(capsys) -> None:
+    capsys.readouterr()
+    project_main(["validate", str(FILLED_TUBE), "--backend", "beat_cpu", "--json"], prog="blab project")
+
+    assert json.loads(capsys.readouterr().out)["warnings"] == []

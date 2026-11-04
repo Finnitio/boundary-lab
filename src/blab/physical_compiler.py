@@ -21,6 +21,7 @@ from blab.acoustic_materials import (
     MaterialError,
     boundary_thermoviscous_wall_losses,
     region_material,
+    region_material_warnings,
     wall_impedance_parameters,
 )
 from blab.component_symmetry import (
@@ -56,6 +57,7 @@ from blab.physical_model import (
     PhysicalSystem,
     PhysicsAssumption,
     ResolvedPhysicalGroup,
+    ValidationWarning,
 )
 from blab.source_motion import prescribed_source_parameters
 from blab.symmetry import snap_points_to_symmetry_planes
@@ -120,6 +122,7 @@ class PhysicalSystemCompiler:
             assumptions=self._assumptions(system),
             source_model_version=system.model_version,
             metadata=metadata,
+            warnings=self._warnings(system),
             contract_version=2
             if any(
                 component.kind == ComponentKind.IDEAL_VELOCITY_SOURCE
@@ -519,6 +522,16 @@ class PhysicalSystemCompiler:
             )
         except MaterialError as exc:
             issues.extend(exc.issues)
+
+    @staticmethod
+    def _warnings(system: PhysicalSystem) -> tuple[ValidationWarning, ...]:
+        warnings: list[ValidationWarning] = []
+        for region in system.regions:
+            material = region_material(
+                region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
+            )
+            warnings.extend(region_material_warnings(material, region_id=region.id))
+        return tuple(warnings)
 
     @staticmethod
     def _porous_region_models(system: PhysicalSystem) -> dict[str, str]:
