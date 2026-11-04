@@ -578,6 +578,25 @@ def test_compiler_accepts_porous_region_with_rigid_moving_and_interface_boundari
     assert (AssumptionStatus.EXCLUDED, "Region-specific acoustic material loss models") not in assumptions
 
 
+def test_compiler_keeps_the_stored_preset_name_out_of_the_engine_loss_model() -> None:
+    system = _with_porous_interior(_fixture_system())
+    system = replace(
+        system,
+        regions=tuple(
+            replace(region, loss_model={**region.loss_model, "preset": "soft_fibrous"})
+            if region.id == "region:interior"
+            else region
+            for region in system.regions
+        ),
+    )
+
+    compiled = PhysicalSystemCompiler().compile(system)
+
+    interior = next(region for region in compiled.regions if region.id == "region:interior")
+    assert interior.loss_model == SOFT_FIBROUS_JCA
+    assert next(r for r in system.regions if r.id == "region:interior").loss_model["preset"] == "soft_fibrous"
+
+
 @pytest.mark.parametrize(
     ("parameters", "treatment"),
     (
