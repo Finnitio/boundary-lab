@@ -72,12 +72,41 @@ Validation migrates the project schema, resolves paths relative to the project,
 loads and compiles all meshes and physical groups, checks backend capabilities,
 and reports the solve kind, assumptions, mesh hashes, excitations, outputs, and
 frequency range. It does not launch Julia or assemble solver matrices.
-Findings that do not block a solve are listed under `warnings` as
-`{code, region_id, message}`. `porous_mesh_too_coarse` flags a porous region
-whose mean tetrahedron edge is longer than the BEAT Engine convergence-study
-threshold at the maximum solve frequency (11 P1 or 3 P2 elements per porous
-wavelength, about 5 % input-impedance error); the message gives the needed edge
-length, which can be set as the region's volume mesh size.
+The JSON summary also lists:
+
+- `region_materials`: each region's normalized material as sent to the engine,
+  as `{region_id, name, kind, material}`. `material` holds `model` (`air`,
+  `jca`, or `jcal`), `frame` for porous models, and the SI parameters. Legacy
+  `{}` and `{"bulk_loss_factor": η}` appear as explicit `air`. The editor's
+  `preset` name is not included.
+- `region_seams`: faces shared by two bounded regions on one mesh without a
+  boundary assignment, as `{region_ids, mesh_id, face_count}`. Sound passes
+  through these faces. The list is `[]` when there are none. A shared face
+  assigned in only one region is a validation error.
+- `warnings`: findings that do not block a solve, as
+  `{code, region_id, message}`. The list is `[]` when there are none. The text
+  output of `validate` does not print them, so use `--json`.
+
+Warning codes:
+
+- `porous_mesh_too_coarse` flags a porous region whose mean tetrahedron edge
+  is longer than the BEAT Engine convergence-study threshold at the maximum
+  solve frequency: 11 P1 or 3 P2 elements per porous wavelength, about 5 %
+  input-impedance error. The maximum includes a `--request` overlay's
+  frequencies. The message gives the needed edge length. Remesh that region's
+  volume with that element size or smaller.
+- `porous_thermal_length_below_viscous_length` flags a JCA/JCAL material whose
+  thermal characteristic length Λ′ is smaller than its viscous length Λ. This is
+  unusual for measured data.
+
+Run manifests record `region_materials` and `region_seams` in the same form.
+The material contract is described in
+[Physical System Model](../Physical%20System%20Model.md#materials).
+`examples/filled_tube` (an interior tube filled with JCA),
+`examples/porous_layer_tube` (air in front of a porous layer on one mesh,
+joined by a region seam) and `examples/radiating_filled_tube` (a filled tube
+radiating through an FEM-BEM interface) are small porous projects for checking
+the workflow.
 
 Run the project using its saved frequency, polar, sphere, symmetry, channel, and
 observation-plane settings:

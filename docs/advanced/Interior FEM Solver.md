@@ -42,8 +42,13 @@ effects matter.
 
 - Every bounded region references one tetrahedral FEM mesh and all regions use
   the same sound speed and density.
+- Each region's Material is Air (optional bulk loss factor) or a JCA/JCAL
+  porous equivalent fluid with a rigid or limp frame. Regions on one mesh may
+  meet at region seams. See
+  [Physical System Model](../Physical%20System%20Model.md#materials).
 - Supported boundaries are rigid, moving, and plane-wave tube termination;
-  rigid walls may also carry the existing Miki lining treatment.
+  rigid walls of air regions may also carry the existing Miki lining treatment.
+  Porous regions accept only rigid and moving boundaries and seams.
 - Interfaces and exterior observation points are invalid without an exterior
   region.
 - FEM nodal pressure is retained automatically. Diaphragm velocity and

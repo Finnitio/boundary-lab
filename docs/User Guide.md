@@ -381,15 +381,97 @@ The UI has no unassigned or unused surface state.
 
 For exterior or coupled work, create exactly one **Unbounded Exterior** region
 and assign its BEM surface mesh or meshes. Add a **Bounded Interior** for each
-FEM chamber, choose its tetrahedral mesh and physical volume group, and
-optionally select a homogeneous FEM bulk-loss factor. A project containing
-bounded regions but no unbounded region is a valid interior-only FEM project.
+FEM chamber, choose its tetrahedral mesh and physical volume group, and set its
+**Material**. A project containing bounded regions but no unbounded region is a
+valid interior-only FEM project.
 If the exterior uses adjoining parts of one continuous surface, enable
 **Stitch exterior region meshes**; leave it off for disconnected closed bodies.
 
 An exterior-only system supports prescribed-velocity components. Interior and
 coupled systems also support linear electrodynamic components. The Interfaces
 tab is enabled only when both bounded and unbounded regions exist.
+
+The **Material** cell of a bounded region is a button that shows the current
+material and opens the material dialog:
+
+- `Air` is lossless air.
+- `Air – loss 0.02` is air with a homogeneous FEM bulk loss factor.
+- `JCA – Melamine foam` or `JCAL – Custom` is a porous fill and the preset its
+  values came from, or `Custom`.
+
+The exterior region is always air, so its button is disabled. To damp only part
+of an enclosure, mesh the damping material as its own physical volume group and
+add a second bounded region on the same mesh with that group. Then choose a
+porous material for it. Leave the faces between the two volume groups out of
+every physical surface group so that they become a region seam and sound passes
+through. A tagged surface there defaults to Rigid in both regions and becomes a
+thin rigid partition. See [Physical System Model](Physical%20System%20Model.md#region-seams)
+for the seam rules and `examples/porous_layer_tube` for an example.
+
+#### Material dialog
+
+**Model** selects **Air**, **JCA** (Johnson–Champoux–Allard), or **JCAL** (JCA
+with Lafarge's static thermal permeability). Air shows only the **FEM bulk loss
+factor η**. A lossless air region opens as JCA with the first preset, ready to
+become a damping fill. A region with a bulk loss factor opens as Air. Cancel
+leaves the region unchanged.
+
+For JCA and JCAL, **Preset** fills the parameters from one of nine materials in
+J.-F. Allard and N. Atalla, *Propagation of Sound in Porous Media*, 2nd ed.,
+Wiley 2009. The line below it names the source table:
+
+| Preset | φ | σ [Pa·s/m²] | α∞ | Λ / Λ′ [µm] | ρ₁ [kg/m³] | Source |
+|---|---|---|---|---|---|---|
+| Soft foam | 0.99 | 10 900 | 1.02 | 100 / 130 | 8.8 | Table 11.5 (Foam (3)), p. 271 |
+| Open-cell foam | 0.98 | 6 600 | 1.03 | 200 / 380 | 11.2 | Table 11.9 (Foam), p. 276 |
+| Melamine foam | 0.99 | 12 569 | 1.02 | 78 / 192 | 8.85 | Table 13.1, p. 328 |
+| Soft fibrous | 0.98 | 25 000 | 1.02 | 90 / 180 | 30 | Table 11.2, p. 254 |
+| Felt | 0.99 | 23 000 | 1.4 | 64 / 131 | 66 | Table 11.5 (Felt (1)), p. 271 |
+| Blanket | 0.98 | 34 000 | 1.18 | 60 / 86 | 41 | Table 11.4 (Blanket (1)), p. 270 |
+| Mineral wool | 0.95 | 34 000 | 1.0 | 40 / 80 | 90 | Table 12.2, p. 293 |
+| Glass wool | 0.94 | 40 000 | 1.06 | 56 / 110 | 130 | Table 11.8, p. 275 |
+| Rock wool | 0.94 | 135 000 | 2.1 | 49 / 166 | 130 | Table 13.2, p. 337 |
+
+No preset includes a measured static thermal permeability. The book has no data
+for typical loudspeaker waddings such as polyester, BAF, or Sonofil. For those,
+enter manufacturer or measured values as **Custom**.
+
+The fields are **Porosity φ**, **Flow resistivity σ** [Pa·s/m²], **Tortuosity
+α∞**, **Viscous length Λ** [µm], and **Thermal length Λ′** [µm]. JCAL adds
+**Static thermal permeability k₀′** [m²]. When you switch to JCAL, the dialog
+prefills k₀′ = φΛ′²/8, the value at which JCAL equals JCA. Replace it with a
+measured value if you have one. Editing any field switches **Preset** to
+**Custom**. Choosing a preset again overwrites the fields. The project stores
+all values in SI units with the preset name, or `custom`.
+
+**Frame** selects **Rigid** or **Limp**. Limp adds **Frame density ρ₁**
+[kg/m³] and shows the decoupling frequency F_d = σφ²/(2πρ₁). Below F_d the
+light frame moves with the air, and well above it the frame acts as rigid. Use
+Limp for light, loose wadding and Rigid for stiff, heavy, or bonded materials.
+[Model Assumptions](Model%20Assumptions.md#porous-region-materials) explains
+when each model and frame applies and what they do not represent.
+
+Invalid or missing values are listed in red below the fields and disable
+**OK**. A thermal length shorter than the viscous length is shown as a
+warning and can be accepted.
+
+A porous region may have rigid and moving boundaries, interfaces to the
+exterior, and region seams. Wall Impedance, thermoviscous wall losses, and
+plane-wave terminations on its boundaries stop the solve with a message naming
+the boundary, because the material already carries the losses. Coupled porous
+projects solve with BEAT Engine CPU or CUDA; ROCm and Metal reject them.
+
+A porous region needs a finer mesh than air: at least 11 first-order or 3
+second-order elements per porous wavelength at the highest solve frequency.
+`blab project validate <project.blab.json> --json` reports a coarser region
+under `warnings` as `porous_mesh_too_coarse`, with the needed edge length. The
+desktop application does not show this warning yet. Remesh that volume with a
+smaller element size and import it again.
+
+Velocity-derived displays (Particle Velocity Magnitude and Acoustic Flow Arrows)
+use the air density inside porous regions and are not accurate there. Pressure
+displays and all other results are. See
+[Model Assumptions](Model%20Assumptions.md#porous-region-limitations).
 
 ### Boundaries
 
@@ -399,7 +481,9 @@ Classify each region surface as **Rigid**, **Moving**, or—where applicable—
 **Interface** or **Plane-wave tube termination**. A bounded rigid surface may
 additionally use a rigid-backed porous lining via **Wall Impedance**. The Miki
 model accepts lining thickness and airflow resistivity; disabling it restores
-the hard-wall condition. A plane-wave termination is a bounded-only anechoic
+the hard-wall condition. Miki models a thin lining as a wall property of an
+air region. To resolve a thick fill as a volume, use a porous region Material
+instead. Porous regions do not accept Wall Impedance. A plane-wave termination is a bounded-only anechoic
 Robin boundary intended for a locally one-dimensional tube mode.
 
 Moving boundaries must be owned by exactly one component. An FEM and BEM port

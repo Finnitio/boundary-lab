@@ -11,6 +11,7 @@ and Deploy use that same convention. Physical frequency and wavenumber are posit
 | Normal derivative | `q = -i rho omega v_n` |
 | Burton-Miller coupling | `-i/k` |
 | Passive FEM bulk loss | `K - k^2 M + i eta k^2 M` |
+| Porous equivalent fluid (Allard–Atalla `e^{+j omega t}`) | book formulas with `j = i`; passive `Im rho_eq < 0` |
 | Surface admittance contribution | `+i rho omega Y B` |
 | Plane-wave termination | `q = -i k p` |
 | Electrical impedance | `R + i omega L` |
