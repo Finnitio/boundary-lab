@@ -50,6 +50,7 @@ _FIELDS: tuple[tuple[str, str, str, float], ...] = (
     ("static_thermal_permeability_m2", "Static thermal permeability k₀′", "m²", 1.0),
     ("frame_density_kg_per_m3", "Frame density ρ₁", "kg/m³", 1.0),
 )
+_STATIC_THERMAL_PERMEABILITY_KEY = "static_thermal_permeability_m2"
 _FIELD_LABELS = {key: label for key, label, _unit, _scale in _FIELDS}
 _DISPLAY_PER_SI = {key: scale for key, _label, _unit, scale in _FIELDS}
 
@@ -82,7 +83,8 @@ class RegionMaterialDialog(QDialog):
         self._region_name = region_name
         self._values: dict[str, float | None] = {}
         self._parse_errors: dict[str, str] = {}
-        self._filling = False
+        # The k₀′ the dialog last derived as φΛ′²/8; a k₀′ that differs was entered or loaded and is kept.
+        self._prefilled_static_thermal_permeability: float | None = None
 
         self.model_combo = QComboBox()
         for model, label in _MODEL_LABELS.items():
@@ -184,14 +186,18 @@ class RegionMaterialDialog(QDialog):
             self._set_value(key, value)
         self._prefill_static_thermal_permeability()
 
-    def _prefill_static_thermal_permeability(self) -> None:
+    def _prefill_static_thermal_permeability(self, *, keep_entered: bool = False) -> None:
+        """Set k₀′ = φΛ′²/8; with ``keep_entered`` only when k₀′ is empty or still the last prefill."""
+
+        current = self._values.get(_STATIC_THERMAL_PERMEABILITY_KEY)
+        if keep_entered and current is not None and current != self._prefilled_static_thermal_permeability:
+            return
         porosity = self._values.get("porosity")
         thermal = self._values.get("thermal_characteristic_length_m")
         if porosity is not None and thermal is not None:
-            self._set_value(
-                "static_thermal_permeability_m2",
-                jcal_static_thermal_permeability(porosity=porosity, thermal_characteristic_length_m=thermal),
-            )
+            value = jcal_static_thermal_permeability(porosity=porosity, thermal_characteristic_length_m=thermal)
+            self._set_value(_STATIC_THERMAL_PERMEABILITY_KEY, value)
+            self._prefilled_static_thermal_permeability = value
 
     # -- reactions -----------------------------------------------------------
 
@@ -214,7 +220,7 @@ class RegionMaterialDialog(QDialog):
 
     def _model_changed(self, _index: int) -> None:
         if self.model_combo.currentData() == MATERIAL_MODEL_JCAL:
-            self._prefill_static_thermal_permeability()
+            self._prefill_static_thermal_permeability(keep_entered=True)
         if self._values.get(REGION_BULK_LOSS_FACTOR_KEY) is None and self.model_combo.currentData() == "air":
             self._set_value(REGION_BULK_LOSS_FACTOR_KEY, 0.0)
         self._refresh()

@@ -106,6 +106,40 @@ def test_switching_to_jcal_prefills_the_static_thermal_permeability() -> None:
     assert loss_model["preset"] == "glass_wool"
 
 
+def test_switching_jcal_to_jca_and_back_keeps_a_user_entered_static_thermal_permeability() -> None:
+    dialog = RegionMaterialDialog(GLASS_WOOL_JCA, region_name="Box")
+    _choose(dialog.model_combo, "jcal")
+    _type(dialog, "static_thermal_permeability_m2", "3e-9")
+
+    _choose(dialog.model_combo, "jca")
+    _choose(dialog.model_combo, "jcal")
+
+    assert dialog.fields["static_thermal_permeability_m2"].text() == "3e-9"
+    assert dialog.loss_model()["static_thermal_permeability_m2"] == pytest.approx(3e-9)
+
+
+def test_a_jcal_project_value_survives_a_jca_round_trip() -> None:
+    measured = {**GLASS_WOOL_JCA, "model": "jcal", "static_thermal_permeability_m2": 2.5e-9, "preset": "custom"}
+    dialog = RegionMaterialDialog(measured, region_name="Box")
+
+    _choose(dialog.model_combo, "jca")
+    _choose(dialog.model_combo, "jcal")
+
+    assert dialog.loss_model()["static_thermal_permeability_m2"] == pytest.approx(2.5e-9)
+
+
+def test_an_untouched_prefill_follows_a_changed_thermal_length() -> None:
+    dialog = RegionMaterialDialog(GLASS_WOOL_JCA, region_name="Box")
+    _choose(dialog.model_combo, "jcal")
+    _choose(dialog.model_combo, "jca")
+    _type(dialog, "thermal_characteristic_length_m", "200")
+
+    _choose(dialog.model_combo, "jcal")
+
+    # 0.94 * (200 um)^2 / 8 = 4.7e-9 m^2
+    assert dialog.loss_model()["static_thermal_permeability_m2"] == pytest.approx(4.7e-9)
+
+
 def test_limp_frame_shows_the_frame_density_and_the_decoupling_frequency_hint() -> None:
     dialog = RegionMaterialDialog(GLASS_WOOL_JCA, region_name="Box")
     assert not _shown(dialog, "frame_density_kg_per_m3")
