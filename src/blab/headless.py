@@ -279,13 +279,24 @@ def prepare_headless_solve(
     """Build and validate a canonical system request from a project and overlay."""
 
     preferences = project.preferences
+    frequencies = spec.frequencies_hz
+    if frequencies is None:
+        frequencies = tuple(
+            float(value)
+            for value in build_log_frequencies(
+                preferences.freq_min_hz,
+                preferences.freq_max_hz,
+                preferences.freq_count,
+            )
+        )
     sphere_angle_deg = min(max(float(preferences.balloon_angle_precision_deg), 0.5), 15.0)
     spherical_count = max(int(round(41253.0 / sphere_angle_deg**2)), 1)
     prepared = prepare_system_solve(
         project.physical_system,
-        freq_min_hz=preferences.freq_min_hz,
-        freq_max_hz=preferences.freq_max_hz,
-        freq_count=preferences.freq_count,
+        # The final frequencies replace the preliminary sweep below; their maximum sets the mesh check.
+        freq_min_hz=min(frequencies),
+        freq_max_hz=max(frequencies),
+        freq_count=len(frequencies),
         observation_distance_m=preferences.polar_observation_distance_m,
         polar_angle_step_deg=preferences.polar_angle_step_deg,
         spherical_sampling_enabled=preferences.spherical_sampling_enabled,
@@ -313,16 +324,6 @@ def prepare_headless_solve(
     }:
         raise ValueError("Interior FEM solves cannot retain BEM boundary quantities.")
     request = prepared.request
-    frequencies = spec.frequencies_hz
-    if frequencies is None:
-        frequencies = tuple(
-            float(value)
-            for value in build_log_frequencies(
-                preferences.freq_min_hz,
-                preferences.freq_max_hz,
-                preferences.freq_count,
-            )
-        )
 
     if "interface_radiated_pressure" in spec.retain and not request.compiled_system.interfaces:
         raise ValueError("Retaining interface radiation requires a coupled system with FEM-BEM interfaces.")

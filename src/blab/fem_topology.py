@@ -69,4 +69,38 @@ def selected_volume_surface_tags(
     return frozenset(surface_tags)
 
 
-__all__ = ["selected_volume_surface_tags"]
+def selected_tetrahedra(mesh: meshio.Mesh, selected_volume_tags: Iterable[int]) -> np.ndarray:
+    """Return the tetrahedra (4 or 10 node columns) of the selected physical volume tags."""
+
+    selected_tags = tuple(int(tag) for tag in selected_volume_tags)
+    physical_blocks = mesh.cell_data.get("gmsh:physical")
+    if physical_blocks is None or len(physical_blocks) != len(mesh.cells):
+        raise ValueError("FEM mesh tetrahedra do not contain gmsh:physical volume tags.")
+    selected: list[np.ndarray] = []
+    for block, raw_tags in zip(mesh.cells, physical_blocks, strict=True):
+        if block.type not in _TETRAHEDRON_TYPES:
+            continue
+        cells = np.asarray(block.data, dtype=np.int64)
+        tags = np.asarray(raw_tags, dtype=np.int64)
+        if tags.shape != (cells.shape[0],):
+            raise ValueError("FEM mesh physical-volume tags do not align with its tetrahedra.")
+        mask = np.isin(tags, selected_tags)
+        if np.any(mask):
+            selected.append(cells[mask])
+    if not selected:
+        return np.empty((0, 4), dtype=np.int64)
+    widths = {cells.shape[1] for cells in selected}
+    if len(widths) != 1:
+        raise ValueError("FEM mesh mixes first- and second-order tetrahedra.")
+    return np.vstack(selected)
+
+
+def mean_tetrahedron_edge_length(points: np.ndarray, tetrahedra: np.ndarray) -> float:
+    """Return the mean corner-to-corner edge length of tetrahedra, repeated edges included."""
+
+    vertices = np.asarray(points, dtype=float)[np.asarray(tetrahedra, dtype=np.int64)[:, :4]]
+    pairs = ((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3))
+    return float(np.mean([np.linalg.norm(vertices[:, b] - vertices[:, a], axis=1) for a, b in pairs]))
+
+
+__all__ = ["mean_tetrahedron_edge_length", "selected_tetrahedra", "selected_volume_surface_tags"]

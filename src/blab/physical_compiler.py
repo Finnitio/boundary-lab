@@ -20,6 +20,7 @@ from blab.acoustic_materials import (
     WALL_IMPEDANCE_KEY,
     MaterialError,
     boundary_thermoviscous_wall_losses,
+    porous_wavelength_m,
     region_material,
     region_material_warnings,
     wall_impedance_parameters,
@@ -33,7 +34,7 @@ from blab.component_symmetry import (
     infer_weighted_surface_area,
 )
 from blab.config import normalize_symmetry
-from blab.fem_topology import selected_volume_surface_tags
+from blab.fem_topology import mean_tetrahedron_edge_length, selected_tetrahedra, selected_volume_surface_tags
 from blab.interface_conform import InterfaceConformError, build_conforming_interface_map
 from blab.mesh_data import read_resource_mesh
 from blab.physical_model import (
@@ -85,7 +86,10 @@ class PhysicalSystemCompiler:
         system: PhysicalSystem,
         *,
         symmetry_mode: str = "off",
+        freq_max_hz: float | None = None,
     ) -> CompiledPhysicalSystem:
+        """Compile ``system``; with ``freq_max_hz`` also check porous mesh resolution at that frequency."""
+
         symmetry = normalize_symmetry(symmetry_mode)
         self._validate_authoring_model(system)
         meshes_by_id = {mesh.id: mesh for mesh in system.meshes}
@@ -122,7 +126,12 @@ class PhysicalSystemCompiler:
             assumptions=self._assumptions(system),
             source_model_version=system.model_version,
             metadata=metadata,
-            warnings=self._warnings(system),
+            warnings=self._warnings(system)
+            + (
+                ()
+                if freq_max_hz is None
+                else self._mesh_resolution_warnings(compiled_regions, meshes_by_id, freq_max_hz)
+            ),
             contract_version=2
             if any(
                 component.kind == ComponentKind.IDEAL_VELOCITY_SOURCE
@@ -531,6 +540,57 @@ class PhysicalSystemCompiler:
                 region.loss_model, region_id=region.id, bounded=region.kind == AcousticRegionKind.BOUNDED_AIR
             )
             warnings.extend(region_material_warnings(material, region_id=region.id))
+        return tuple(warnings)
+
+    def _mesh_resolution_warnings(
+        self,
+        regions: tuple[CompiledRegion, ...],
+        meshes_by_id: dict[str, MeshResource],
+        freq_max_hz: float,
+    ) -> tuple[ValidationWarning, ...]:
+        """Warn per porous region whose mean tetrahedron edge exceeds the engine's convergence-study
+        threshold (``porous_mesh_edge_length_m``) for its element order at ``freq_max_hz``."""
+
+        from beat_engine.beat_contract import porous_mesh_edge_length_m, porous_mesh_resolution
+
+        warnings: list[ValidationWarning] = []
+        resolution = porous_mesh_resolution()
+        target_error = float(resolution["target_relative_impedance_error"])
+        for region in regions:
+            material = region_material(region.loss_model, region_id=region.id, bounded=True)
+            if not material.is_porous:
+                continue
+            wavelength_m = porous_wavelength_m(
+                material,
+                freq_max_hz,
+                density_kg_per_m3=region.density_kg_per_m3,
+                sound_speed_m_per_s=region.sound_speed_m_per_s,
+            )
+            for mesh_id in region.mesh_ids:
+                resource = meshes_by_id[mesh_id]
+                mesh = self._read_mesh(resource)
+                tetrahedra = selected_tetrahedra(
+                    mesh, {int(group.tag) for group in region.volume_groups if group.mesh_id == mesh_id}
+                )
+                if not len(tetrahedra):
+                    continue
+                element_order = 2 if tetrahedra.shape[1] == 10 else 1
+                edge_m = mean_tetrahedron_edge_length(np.asarray(mesh.points) * float(resource.scale_to_m), tetrahedra)
+                needed_m = porous_mesh_edge_length_m(wavelength_m, element_order)
+                if edge_m <= needed_m:
+                    continue
+                elements = resolution["min_elements_per_wavelength"][str(element_order)]
+                warnings.append(
+                    ValidationWarning(
+                        code="porous_mesh_too_coarse",
+                        region_id=region.id,
+                        message=f"Region '{region.id}' {material.model.upper()} mesh on '{mesh_id}' is too coarse "
+                        f"at {freq_max_hz:g} Hz: mean P{element_order} tetrahedron edge {edge_m * 1e3:.2f} mm, needed "
+                        f"<= {needed_m * 1e3:.2f} mm ({elements} elements per porous wavelength "
+                        f"{wavelength_m * 1e3:.1f} mm, about {target_error:.0%} input-impedance error otherwise). "
+                        f"Set a volume mesh size of {needed_m * 1e3:.2f} mm or less for this region.",
+                    )
+                )
         return tuple(warnings)
 
     @staticmethod

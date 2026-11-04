@@ -108,7 +108,9 @@ def prepare_system_solve(
             symmetry_mode=symmetry,
         )
     report("Compiling physical system...")
-    compiled = PhysicalSystemCompiler().compile(system, symmetry_mode=symmetry)
+    compiled = PhysicalSystemCompiler().compile(
+        system, symmetry_mode=symmetry, freq_max_hz=float(max(freq_min_hz, freq_max_hz))
+    )
     report("Preparing result domains...")
     impedance_normalization = normalization_records(compiled.metadata)
     solve_kind = infer_physical_solve_kind(system)
