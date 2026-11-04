@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 
@@ -35,6 +36,7 @@ from blab.component_symmetry import (
 )
 from blab.config import normalize_symmetry
 from blab.fem_topology import (
+    Face,
     mean_tetrahedron_edge_length,
     selected_tetrahedra,
     selected_volume_exterior_faces,
@@ -106,8 +108,8 @@ class PhysicalSystemCompiler:
         compiled_boundaries_by_id = {boundary.id: boundary for boundary in compiled_boundaries}
         compiled_components, impedance_normalization = self._compile_components(system, symmetry)
 
-        region_seams = self._region_seams(compiled_regions, compiled_boundaries, meshes_by_id)
-        self._validate_boundary_coverage(compiled_regions, compiled_boundaries, meshes_by_id)
+        region_seams, seam_faces = self._region_seams(compiled_regions, compiled_boundaries, meshes_by_id)
+        self._validate_boundary_coverage(compiled_regions, compiled_boundaries, meshes_by_id, seam_faces)
         compiled_interfaces = tuple(
             self._compile_interface(
                 interface,
@@ -816,16 +818,16 @@ class PhysicalSystemCompiler:
         regions: tuple[CompiledRegion, ...],
         compiled_boundaries: tuple[CompiledBoundary, ...],
         meshes_by_id: dict[str, MeshResource],
-    ) -> tuple[RegionSeam, ...]:
+    ) -> tuple[tuple[RegionSeam, ...], dict[tuple[str, str], frozenset[Face]]]:
         """Classify the faces shared by two bounded regions on one mesh (mirrors the engine).
 
-        Unassigned on both sides: a region seam. Assigned on both sides: a thin rigid
-        partition (each side keeps its own boundary). Assigned on one side only: rejected,
-        because the engine would have to drop one side's boundary.
+        Returns the seams and, per ``(region id, mesh id)``, the seam faces, which carry no
+        boundary of that region. See ``_classify_shared_faces`` for the classification.
         """
 
         bounded = [region for region in regions if region.kind == AcousticRegionKind.BOUNDED_AIR]
         seams: list[RegionSeam] = []
+        seam_faces_by_region_mesh: dict[tuple[str, str], set[Face]] = {}
         issues: list[str] = []
         for mesh_id in dict.fromkeys(mesh_id for region in bounded for mesh_id in region.mesh_ids):
             on_mesh = [region for region in bounded if mesh_id in region.mesh_ids]
@@ -855,19 +857,12 @@ class PhysicalSystemCompiler:
                     shared = exterior_faces[first.id] & exterior_faces[second.id]
                     if not shared:
                         continue
-                    seam_faces = 0
-                    one_sided: dict[str, set[int]] = {first.id: set(), second.id: set()}
-                    for face in shared:
-                        tags = tags_by_face.get(face, frozenset())
-                        by_first = tags & assigned_tags[first.id]
-                        by_second = tags & assigned_tags[second.id]
-                        if not by_first and not by_second:
-                            seam_faces += 1
-                        elif not by_first or not by_second:
-                            one_sided[first.id if by_first else second.id].update(by_first or by_second)
+                    seam_faces, one_sided = _classify_shared_faces(
+                        shared,
+                        tags_by_face,
+                        {region_id: assigned_tags[region_id] for region_id in (first.id, second.id)},
+                    )
                     for owner, tags in one_sided.items():
-                        if not tags:
-                            continue
                         other = second.id if owner == first.id else first.id
                         names = [self._name_for_tag(mesh, tag, 2, required=False) or str(tag) for tag in sorted(tags)]
                         issues.append(
@@ -877,18 +872,23 @@ class PhysicalSystemCompiler:
                         )
                     if seam_faces:
                         seams.append(
-                            RegionSeam(region_ids=(first.id, second.id), mesh_id=mesh_id, face_count=seam_faces)
+                            RegionSeam(region_ids=(first.id, second.id), mesh_id=mesh_id, face_count=len(seam_faces))
                         )
+                        for region_id in (first.id, second.id):
+                            seam_faces_by_region_mesh.setdefault((region_id, mesh_id), set()).update(seam_faces)
         if issues:
             raise PhysicalModelCompileError(issues)
-        return tuple(seams)
+        return tuple(seams), {key: frozenset(faces) for key, faces in seam_faces_by_region_mesh.items()}
 
     def _validate_boundary_coverage(
         self,
         regions: tuple[CompiledRegion, ...],
         compiled_boundaries: tuple[CompiledBoundary, ...],
         meshes_by_id: dict[str, MeshResource],
+        seam_faces: dict[tuple[str, str], frozenset[Face]],
     ) -> None:
+        """Require every exterior surface tag of a region to be assigned once; seam faces are exempt."""
+
         boundaries_by_region: dict[str, list[CompiledBoundary]] = {}
         for boundary in compiled_boundaries:
             boundaries_by_region.setdefault(boundary.region_id, []).append(boundary)
@@ -907,7 +907,13 @@ class PhysicalSystemCompiler:
                         int(group.tag) for group in region.volume_groups if group.mesh_id == mesh_id
                     }
                     try:
-                        present_tags = set(selected_volume_surface_tags(mesh, selected_volume_tags))
+                        present_tags = set(
+                            selected_volume_surface_tags(
+                                mesh,
+                                selected_volume_tags,
+                                excluded_faces=seam_faces.get((region.id, mesh_id), frozenset()),
+                            )
+                        )
                     except ValueError as exc:
                         issues.append(f"Region '{region.id}' could not resolve its FEM boundary: {exc}")
                         continue
@@ -1117,3 +1123,31 @@ class PhysicalSystemCompiler:
                 )
             )
         return tuple(assumptions)
+
+
+def _classify_shared_faces(
+    shared_faces: Iterable[Face],
+    tags_by_face: dict[Face, frozenset[int]],
+    assigned_tags: dict[str, set[int]],
+) -> tuple[frozenset[Face], dict[str, set[int]]]:
+    """Classify the faces two regions share by the surface tags each region assigns on them.
+
+    Unassigned on both sides (whether or not the mesh tags the face): a region seam.
+    Assigned on both sides: a thin rigid partition, each side keeps its own boundary.
+    Assigned on one side only: rejected, because the engine would have to drop that
+    boundary. ``assigned_tags`` maps both region ids to their assigned tags; returns the
+    seam faces and, per region with one-sided assignments, the tags it assigns alone.
+    """
+
+    first, second = assigned_tags
+    seam_faces: set[Face] = set()
+    one_sided: dict[str, set[int]] = {}
+    for face in shared_faces:
+        tags = tags_by_face.get(face, frozenset())
+        by_first = tags & assigned_tags[first]
+        by_second = tags & assigned_tags[second]
+        if not by_first and not by_second:
+            seam_faces.add(face)
+        elif not by_first or not by_second:
+            one_sided.setdefault(first if by_first else second, set()).update(by_first or by_second)
+    return frozenset(seam_faces), one_sided

@@ -110,3 +110,15 @@ def test_shared_face_assigned_on_one_side_is_rejected_naming_both_regions(
     assert f"assigned only by region '{assigned_by}'" in message
     # The specific seam message replaces the generic coverage complaint about the other region.
     assert f"Region '{unassigned_by}' has unassigned" not in message
+
+
+def test_shared_face_tagged_but_unassigned_on_both_sides_is_a_seam(tmp_path: Path, capsys) -> None:
+    # Spec: shared faces without assignment become region seams, even when the mesh tags them.
+    project = _project_with_tagged_shared_face(tmp_path, assigned_by=())
+
+    code, summary = _validate(capsys, project)
+
+    assert code == 0 and summary["valid"], summary
+    assert summary["region_seams"] == [
+        {"region_ids": ["region:air", "region:layer"], "mesh_id": "mesh:tube", "face_count": 8}
+    ]

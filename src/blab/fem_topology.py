@@ -18,15 +18,18 @@ Face = tuple[int, int, int]
 def selected_volume_surface_tags(
     mesh: meshio.Mesh,
     selected_volume_tags: Iterable[int],
+    *,
+    excluded_faces: frozenset[Face] = frozenset(),
 ) -> frozenset[int]:
     """Return tagged triangle groups on the boundary of selected tetrahedra.
 
     The operation mirrors the Julia FEM volume restriction: faces shared by
     two selected tetrahedra are internal, while faces occurring once are
     retained only when an explicit physical triangle exists on that face.
+    ``excluded_faces`` (e.g. region seams) contribute no tags.
     """
 
-    exterior_faces = selected_volume_exterior_faces(mesh, selected_volume_tags)
+    exterior_faces = selected_volume_exterior_faces(mesh, selected_volume_tags) - excluded_faces
     return frozenset(
         tag for face, tags in triangle_tags_by_face(mesh).items() if face in exterior_faces for tag in tags
     )
