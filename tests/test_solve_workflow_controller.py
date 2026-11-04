@@ -783,3 +783,43 @@ def test_provider_cancel_cannot_stop_unrelated_job(controller):
     assert controller.solve.cancelled == 0
     controller.cancel_provider_solve("owned")
     assert controller.solve.cancelled == 1
+
+
+def test_solve_shows_compiler_validation_warnings_without_blocking_the_solve(controller) -> None:
+    from blab.physical_model import ValidationWarning
+
+    warnings = (
+        ValidationWarning(code="porous_mesh_too_coarse", region_id="region:fill", message="Fill mesh is too coarse."),
+        ValidationWarning(
+            code="porous_thermal_length_below_viscous_length", region_id="region:fill", message="Check Λ′."
+        ),
+    )
+    prepared = SimpleNamespace(
+        excitation_channel_names=np.asarray([], dtype=str),
+        request=SimpleNamespace(
+            compiled_system=SimpleNamespace(
+                interfaces=(),
+                excitation_ports=(),
+                components=(),
+                regions=(SimpleNamespace(density_kg_per_m3=1.2, sound_speed_m_per_s=340.0),),
+                metadata={},
+                warnings=warnings,
+            ),
+            excitation_port_ids=(),
+            frequencies_hz=(100.0,),
+            solver_options={},
+        ),
+        backend_id="beat_cpu",
+        solve_kind=PhysicalSolveKind.INTERIOR_FEM,
+        result_domains=(),
+    )
+
+    controller._start_prepared_system_solve(prepared, "Starting")
+
+    assert controller.view.warnings == [
+        (
+            "Validation warnings",
+            "The solve continues, but check these findings:\n\n• Fill mesh is too coarse.\n• Check Λ′.",
+        )
+    ]
+    assert controller.solve.started == [prepared]

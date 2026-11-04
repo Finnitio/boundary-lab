@@ -464,9 +464,10 @@ projects solve with BEAT Engine CPU or CUDA; ROCm and Metal reject them.
 A porous region needs a finer mesh than air: at least 11 first-order or 3
 second-order elements per porous wavelength at the highest solve frequency.
 `blab project validate <project.blab.json> --json` reports a coarser region
-under `warnings` as `porous_mesh_too_coarse`, with the needed edge length. The
-desktop application does not show this warning yet. Remesh that volume with a
-smaller element size and import it again.
+under `warnings` as `porous_mesh_too_coarse`, with the needed edge length.
+**Solve** shows the same findings (and a thermal length shorter than the viscous
+length) in a **Validation warnings** message before it starts; the solve still
+runs. Remesh that volume with a smaller element size and import it again.
 
 Velocity-derived displays (Particle Velocity Magnitude and Acoustic Flow Arrows)
 use the air density inside porous regions and are not accurate there. Pressure
