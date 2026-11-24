@@ -300,6 +300,8 @@ def _artifact_to_payload(
             for mesh in artifact.meshes
         ]
         payload["provider_metadata"] = dict(artifact.provider_metadata)
+        if artifact.reduced:
+            payload["reduced"] = True
     return payload
 
 
@@ -339,6 +341,7 @@ def _artifact_from_payload(payload: object) -> GeneratedGeometryReference | None
         output_dir=output_dir,
         meshes=meshes,
         provider_metadata=dict(payload.get("provider_metadata", {})),
+        reduced=bool(meshes) and payload.get("reduced") is True,
         mesh_path=mesh_path or "",
         cleaned_mesh_path=_optional_path_text(payload.get("cleaned_mesh_path")),
         reduced_cleaned_mesh_path=_optional_path_text(payload.get("reduced_cleaned_mesh_path")),

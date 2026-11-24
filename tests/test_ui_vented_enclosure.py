@@ -12,7 +12,7 @@ from test_vented_enclosure_generator import plugin as plugin
 def test_bundled_plugin_is_enabled_once():
     settings = MemorySettings({"providers/default": "ath", "providers/enabled": ["custom.plugin", {}]})
     preferences = load_gui_preferences(settings)
-    assert preferences.enabled_geometry_providers == ("custom.plugin", PROVIDER)
+    assert preferences.enabled_geometry_providers == ("custom.plugin", PROVIDER, "blab.cad_import")
     preferences.enabled_geometry_providers = ("custom.plugin",)
     save_gui_preferences(settings, preferences)
     assert load_gui_preferences(settings).enabled_geometry_providers == ("custom.plugin",)

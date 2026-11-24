@@ -83,3 +83,42 @@ For provenance or a custom reader, open `manifest.json` first. It records projec
 | Submit to a server | `project solve --server-url URL` delegates backend selection to the server and omits saved observation planes. [Server setup](../Boundary%20Lab%20Server.md) |
 | Export a speaker package | `project export-speaker PROJECT --output speaker.blabsp` includes a continuous Level 1 pattern over the saved project band at every fidelity. Use `--fidelity coupled` for a continuous Level 3 interior or `--fidelity fixed` for sampled Level 2 sources. [Speaker packages](../Inputs%20and%20Outputs.md#exporting-speaker-packages) |
 | Clean a mesh or plot historical NPZ files | See `blab clean --help`, `blab prepare --help` and `blab plot --help`. |
+| Mesh a STEP file without the desktop app | [Mesh a STEP file](#mesh-a-step-file) |
+
+## Mesh a STEP file
+
+The CAD import plugin carries its own command line. Run it from any working directory, such as the
+folder holding your STEP file, with the plugin folder on the Python path; input and output paths are
+relative to that working directory, not to the application folder:
+
+```bash
+PYTHONPATH=/path/to/boundary-lab/geometry_providers/cad_import \
+  python -m cadimport.cli enclosure.step --fmax 2000 --elements-per-wavelength 6 --output meshes
+```
+
+```powershell
+$env:PYTHONPATH = "C:\path\to\boundary-lab\geometry_providers\cad_import"
+python -m cadimport.cli enclosure.step --fmax 2000 --elements-per-wavelength 6 --output meshes
+```
+
+Runs the CAD import pipeline without the desktop app and writes one `<mesh id>.msh`
+file per mesh, in metres. Solids become air bodies: touching air bodies share one
+tetrahedral mesh with a volume group per body. Surface bodies together form the
+`exterior.msh` BEM surface. Air faces that fill openings in the exterior get a
+`Interface <n> <body>` surface group in both meshes, node for node; every other face is in
+`walls`. The target element size is sound speed ÷ `--fmax` ÷ elements per wavelength
+(`--sound-speed`, default 343 m/s). `--elements-per-wavelength` (default 6) is the FEM mesh
+fineness, for air-body volumes and faces; `--bem-elements-per-wavelength` is the BEM one, for
+exterior surface faces (default: the FEM value; the desktop app's BEM Fine, Medium and Coarse
+are 12, 5 and 0.3). A face on both, an interface, takes the finer. The command prints both
+target element sizes. Meshes are refined on curved edges to about 12 elements per
+circle. `--rotate X,Y,Z` rotates by those degrees about the X, Y and Z axes (in that order, about
+the origin) and `--translate X,Y,Z` moves by those millimetres (write a leading negative
+value as `--rotate=-90,0,0`). Closed shells
+of surfaces (how SolidWorks writes solids of parts that mix solid and surface bodies)
+are guessed air bodies, unless the file has no other exterior surface (then the largest
+is the exterior); `--closed-shell "Closed shell 1=exterior"` (repeatable) sets one. The
+command prints the meshes and groups, the bounding box, the closed shells
+and their roles, detected interfaces, the suggested
+symmetry (open exterior edges on X=0 / Y=0), and warnings such as open exterior
+edges or air faces covered by the exterior.

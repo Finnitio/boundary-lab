@@ -21,6 +21,8 @@ dependencies = [
 fields = ["pyvista>=0.47"]
 dev = [
   "pytest",
+  "pytest-timeout",
+  "pytest-xdist",
   "ruff>=0.15,<0.16",
 ]
 gui = [
@@ -42,6 +44,11 @@ packages = ["src/blab"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+timeout = 60
+addopts = "-m 'not slow'"
+markers = [
+  "slow: slow test, skipped by default; run everything with `-n auto -m \"\"`",
+]
 
 [tool.ruff]
 target-version = "py311"
