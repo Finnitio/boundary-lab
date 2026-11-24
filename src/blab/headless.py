@@ -24,6 +24,7 @@ from blab.phasor import SOLVER_PHASOR_CONVENTION
 from blab.physical_model import PhysicalSolveKind, PhysicalSystem, physical_system_from_dict
 from blab.project.io import PROJECT_SCHEMA_VERSION, read_project_file
 from blab.project.model import ProjectPreferencesState, generator_documents_from_payload, generator_mesh_name
+from blab.solve_eta import SolveProgress
 from blab.solve_results import (
     BEM_BOUNDARY_DOMAIN_ID,
     BEM_BOUNDARY_NEUMANN_ID,
@@ -421,7 +422,15 @@ class HeadlessResultWriter:
         self.output_dir.mkdir(parents=True)
         self.frequency_dir = self.output_dir / "frequencies"
         self.frequency_dir.mkdir()
-        shutil.copyfile(project.path, self.output_dir / "project.snapshot.blab.json")
+        snapshot = self.output_dir / "project.snapshot.blab.json"
+        if project.path.suffix.lower() == ".blab":
+            from blab.project.io import write_project_file
+            from blab.project.package import read_package
+
+            payload, _, _ = read_package(project.path, asset_parent=self.output_dir)
+            write_project_file(snapshot, payload)
+        else:
+            shutil.copyfile(project.path, snapshot)
         _write_json(self.output_dir / "request.json", public_request)
         _write_json(
             self.output_dir / "compiled-system.json",
@@ -572,6 +581,7 @@ def run_headless_solve(
         public_request=public_request,
     )
     solved_count = 0
+    progress = SolveProgress(len(writer.frequencies))
     emit(
         {
             "event": "started",
@@ -590,9 +600,12 @@ def run_headless_solve(
         )
         request = replace(
             prepared.request,
-            status_callback=lambda message: emit({"event": "status", "message": str(message)}),
+            status_callback=lambda message: emit(
+                {"event": "status", "message": str(message), **progress.status_fields()}
+            ),
         )
         session = backend.create_system_session(request)
+        progress.start_warm_up(session.warm_up_key())
         for raw_result in session.solve_stream():
             result = canonicalize_observation_result(prepared, raw_result)
             index = writer.write_result(result)
@@ -604,6 +617,7 @@ def run_headless_solve(
                     "freq_hz": float(result.freq_hz),
                     "solved_count": solved_count,
                     "frequency_count": len(writer.frequencies),
+                    **progress.frequency_fields(),
                 }
             )
     except KeyboardInterrupt:
