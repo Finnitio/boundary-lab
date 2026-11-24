@@ -89,10 +89,11 @@ settings are applied.
 
 ## Regions
 
-A region represents a connected acoustic domain with material properties such
-as density, sound speed, and an optional loss model. A bounded FEM region may
-define a dimensionless `bulk_loss_factor`. The factor is constant within that
-region and may differ between disconnected interior chambers.
+A region represents a connected acoustic domain with a density, a sound speed,
+and a [Material](#materials). A bounded FEM region is either air, optionally
+with a dimensionless `bulk_loss_factor`, or a porous fill modelled as an
+equivalent fluid. The material is homogeneous within a region and may differ
+between regions, including regions that share one mesh.
 
 The initial model supports two region kinds:
 
@@ -121,7 +122,107 @@ groups. Boundary Lab derives each region's available surfaces from tetrahedral
 face adjacency, so groups belonging only to another volume are not shown or
 accepted. A physical surface group that contains facets adjacent to several
 selected volumes, such as a shared `walls` tag, appears once under each
-applicable region.
+applicable region. Faces that two such regions share are classified as
+[region seams](#region-seams) or thin rigid partitions.
+
+### Materials
+
+Each region's material is stored in its `loss_model`. The **System › Regions**
+editor shows it in the **Material** column (see the User Guide).
+
+| Model | Meaning | Parameters |
+|---|---|---|
+| `air` | Air with the region's density and sound speed | optional `bulk_loss_factor` η, 0 ≤ η ≤ 1 |
+| `jca` | Johnson–Champoux–Allard porous equivalent fluid | φ, σ, α∞, Λ, Λ′ |
+| `jcal` | JCA with Lafarge's measured static thermal permeability | JCA parameters plus k₀′ |
+
+A loss model without `model` is Air: `{}` is lossless air and
+`{"bulk_loss_factor": 0.02}` is air with that factor. Older projects therefore
+read as before without migration, and the editor still saves Air in this form.
+The bulk loss factor exists only for Air.
+
+A porous material (`jca` or `jcal`) also names its **frame**: `rigid` for a
+skeleton that does not move, or `limp` for a light skeleton that moves with the
+air but has no stiffness, which adds the frame density ρ₁. All parameters are
+stored in SI units:
+
+| Key | Symbol | Unit | Admissible |
+|---|---|---|---|
+| `porosity` | φ | 1 | 0 < φ ≤ 1 |
+| `flow_resistivity_pa_s_per_m2` | σ | Pa·s/m² | σ > 0 |
+| `tortuosity` | α∞ | 1 | α∞ ≥ 1 |
+| `viscous_characteristic_length_m` | Λ | m | Λ > 0 |
+| `thermal_characteristic_length_m` | Λ′ | m | Λ′ > 0 |
+| `static_thermal_permeability_m2` (`jcal` only) | k₀′ | m² | k₀′ > 0 |
+| `frame_density_kg_per_m3` (`limp` only) | ρ₁ | kg/m³ | ρ₁ > 0 |
+
+`preset` records the [book preset](User%20Guide.md#material-dialog) that supplied
+the values, or `custom`. The id is informational: a preset whose values were
+edited reads as `custom`, and the solver receives only the parameters.
+
+```json
+"loss_model": {
+  "model": "jca",
+  "frame": "rigid",
+  "porosity": 0.98,
+  "flow_resistivity_pa_s_per_m2": 25000.0,
+  "tortuosity": 1.02,
+  "viscous_characteristic_length_m": 9e-05,
+  "thermal_characteristic_length_m": 0.00018,
+  "preset": "soft_fibrous"
+}
+```
+
+The compiler rejects unknown models, frames, and keys. A key of another model
+or frame counts as unknown, for example k₀′ on `jca` or ρ₁ on a rigid frame. It
+also rejects a missing or out-of-range parameter and a porous material on the
+unbounded exterior. A thermal length shorter than the viscous length (Λ′ < Λ)
+is accepted with the warning `porous_thermal_length_below_viscous_length`,
+because measured materials usually have Λ′ ≥ Λ.
+
+A porous region allows only these boundaries:
+
+- rigid boundaries;
+- moving boundaries, whose velocity drives the material through its effective
+  density;
+- interfaces to the unbounded exterior;
+- region seams to other bounded regions on the same mesh.
+
+Its material carries the losses. Plane-wave tube terminations, thermoviscous
+wall losses, and Miki wall-impedance linings on its boundaries are rejected.
+
+`blab project validate --json` and every run manifest list each region's
+normalized material under `region_materials`. The physics assumptions include
+"Region-specific acoustic material loss models" with the porous models and
+frames in use. The equations, conventions, and engine validation are described
+on the BEAT Engine [Porous materials](https://github.com/JWSound/BEAT_Engine/blob/main/docs/Porous%20Materials.md) page.
+
+### Region seams
+
+Two bounded regions may reference the same tetrahedral mesh with different
+volume groups, such as an air chamber and the damping layer that fills part of
+it. Faces on both regions' outer surfaces are shared faces. Each shared face is
+classified by its boundary assignments:
+
+| First region | Second region | Result |
+|---|---|---|
+| unassigned | unassigned | **Region seam**: an interior face. Both regions use its nodes, so pressure and volume flux are continuous with no boundary or interface object. |
+| assigned | assigned | **Thin rigid partition**: each region keeps its own boundary, as before seams existed. |
+| assigned | unassigned | Error naming both regions and the side that assigns the faces. |
+
+A seam therefore needs a mesh in which the shared faces belong to no physical
+surface group. The System editor assigns every listed surface as Rigid, so a
+tagged shared surface becomes a partition. Seams can join any materials, such
+as air and a porous fill, two porous materials, or air regions with different
+bulk loss factors. Each region's material acts on its own elements. Coupled
+solves on ROCm or Metal reject porous regions and accept a seam only between
+equal bulk loss factors.
+
+`validate --json` and run manifests list each seam under `region_seams` as
+`{region_ids, mesh_id, face_count}`. Faces on separate mesh files are never
+seams. Join such regions by meshing them in one file. The example
+`examples/porous_layer_tube` places a 50 mm air section in front of a
+rigid-backed 50 mm porous layer on one mesh.
 
 ## Boundaries
 
@@ -157,7 +258,10 @@ a bounded region's `rigid` boundary. It remains a rigid boundary assignment and
 stores a `wall_impedance` parameter object containing the `miki` model,
 `thickness_m`, and `flow_resistivity_pa_s_per_m2`. Keeping the assignment rigid
 means disabling the optional treatment returns the same surface to the
-hard-wall condition without changing its physical role.
+hard-wall condition without changing its physical role. Miki is a locally
+reacting lining on an air region's wall. A porous fill that is meshed as its
+own region uses a [porous Material](#materials) instead, and such a region's
+boundaries cannot carry the Miki treatment.
 
 An example boundary assignment is:
 
@@ -525,6 +629,12 @@ The compiler should reject a system when:
 - a passive component has an excitation port;
 - an interface references a boundary that is not marked as an interface;
 - the two sides of a FEM-BEM interface are not conforming;
+- a material is unknown, incomplete, or out of range, or a porous material is
+  used outside a bounded region;
+- a porous region's boundary uses a plane-wave termination, thermoviscous wall
+  losses, or a wall-impedance lining;
+- faces shared by two bounded regions on one mesh are assigned in only one of
+  them;
 - mesh scale, placement, material properties, or excitation-port kinds are invalid.
 
 These checks keep geometry mistakes and product-model mistakes out of the

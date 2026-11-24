@@ -1,0 +1,157 @@
+{
+  "channel_config_by_name": {},
+  "component_channel_by_id": {},
+  "imported_meshes": [
+    {
+      "cleaned_file": null,
+      "enabled": true,
+      "name": "Exterior",
+      "scale_factor": 0.001,
+      "source_file": "exterior.msh",
+      "translation_mm": [0.0, 0.0, 0.0]
+    },
+    {
+      "cleaned_file": null,
+      "enabled": true,
+      "name": "Tube",
+      "scale_factor": 0.001,
+      "source_file": "tube.msh",
+      "translation_mm": [0.0, 0.0, 0.0]
+    }
+  ],
+  "physical_system": {
+    "boundaries": [
+      {
+        "group": {"dimension": 2, "mesh_id": "mesh:tube", "name": "Piston", "tag": null},
+        "id": "boundary:piston",
+        "kind": "moving",
+        "name": "Piston",
+        "parameters": {},
+        "region_id": "region:fill"
+      },
+      {
+        "group": {"dimension": 2, "mesh_id": "mesh:tube", "name": "Opening", "tag": null},
+        "id": "boundary:fill-opening",
+        "kind": "interface",
+        "name": "Opening (fill side)",
+        "parameters": {},
+        "region_id": "region:fill"
+      },
+      {
+        "group": {"dimension": 2, "mesh_id": "mesh:tube", "name": "Walls", "tag": null},
+        "id": "boundary:walls",
+        "kind": "rigid",
+        "name": "Tube walls",
+        "parameters": {},
+        "region_id": "region:fill"
+      },
+      {
+        "group": {"dimension": 2, "mesh_id": "mesh:exterior", "name": "Opening", "tag": null},
+        "id": "boundary:exterior-opening",
+        "kind": "interface",
+        "name": "Opening (exterior side)",
+        "parameters": {},
+        "region_id": "region:exterior"
+      },
+      {
+        "group": {"dimension": 2, "mesh_id": "mesh:exterior", "name": "Body", "tag": null},
+        "id": "boundary:body",
+        "kind": "rigid",
+        "name": "Tube outside",
+        "parameters": {},
+        "region_id": "region:exterior"
+      }
+    ],
+    "components": [
+      {
+        "boundary_ids": ["boundary:piston"],
+        "id": "component:piston",
+        "kind": "ideal_velocity_source",
+        "name": "Piston",
+        "parameters": {"motion_profile": "uniform"}
+      }
+    ],
+    "excitation_ports": [
+      {
+        "component_id": "component:piston",
+        "id": "excitation:piston",
+        "kind": "normal_velocity",
+        "name": "Piston unit normal velocity"
+      }
+    ],
+    "id": "system:radiating-filled-tube",
+    "interfaces": [
+      {
+        "bounded_boundary_id": "boundary:fill-opening",
+        "coordinate_tolerance_m": 1e-08,
+        "id": "interface:opening",
+        "name": "Opening",
+        "unbounded_boundary_id": "boundary:exterior-opening"
+      }
+    ],
+    "meshes": [
+      {
+        "file": "exterior.msh",
+        "id": "mesh:exterior",
+        "name": "Exterior",
+        "purpose": "bem_surface",
+        "scale_to_m": 0.001,
+        "translation_m": [0.0, 0.0, 0.0]
+      },
+      {
+        "file": "tube.msh",
+        "id": "mesh:tube",
+        "name": "Tube",
+        "purpose": "fem_volume",
+        "scale_to_m": 0.001,
+        "translation_m": [0.0, 0.0, 0.0]
+      }
+    ],
+    "metadata": {
+      "description": "Tube filled with soft fibrous material (Allard & Atalla 2nd ed., Table 11.2, JCA rigid frame), driven by a piston and radiating from its open end through an FEM-BEM interface."
+    },
+    "model_version": 1,
+    "name": "Radiating filled tube (JCA)",
+    "regions": [
+      {
+        "density_kg_per_m3": 1.21,
+        "id": "region:exterior",
+        "kind": "unbounded_air",
+        "loss_model": {},
+        "mesh_ids": ["mesh:exterior"],
+        "name": "Exterior air",
+        "sound_speed_m_per_s": 343.0,
+        "volume_groups": []
+      },
+      {
+        "density_kg_per_m3": 1.21,
+        "id": "region:fill",
+        "kind": "bounded_air",
+        "loss_model": {
+          "model": "jca",
+          "frame": "rigid",
+          "porosity": 0.98,
+          "flow_resistivity_pa_s_per_m2": 25000.0,
+          "tortuosity": 1.02,
+          "viscous_characteristic_length_m": 9e-05,
+          "thermal_characteristic_length_m": 0.00018
+        },
+        "mesh_ids": ["mesh:tube"],
+        "name": "Porous fill",
+        "sound_speed_m_per_s": 343.0,
+        "volume_groups": [{"dimension": 3, "mesh_id": "mesh:tube", "name": "Volume", "tag": null}]
+      }
+    ]
+  },
+  "project_preferences": {
+    "freq_count": 3,
+    "freq_max_hz": 1500,
+    "freq_min_hz": 200,
+    "polar_angle_step_deg": 5.0,
+    "polar_observation_distance_m": 1.0,
+    "spherical_sampling_enabled": false
+  },
+  "schema_version": 10,
+  "stitch_exterior_meshes": false,
+  "symmetry": "off"
+}

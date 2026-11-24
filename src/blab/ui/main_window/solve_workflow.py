@@ -503,6 +503,14 @@ class SolveWorkflowController(QObject):
                 "Front and rear driven areas differ by more than 10%. "
                 "Normalized acoustic impedance will use their average:\n\n" + details,
             )
+        validation_warnings = tuple(getattr(compiled_system, "warnings", ()))
+        if validation_warnings and self._provider_job_id is None:
+            # Non-blocking compiler findings (coarse porous mesh, Λ′ < Λ); `blab project validate` lists them too.
+            self._view.warn(
+                "Validation warnings",
+                "The solve continues, but check these findings:\n\n"
+                + "\n".join(f"• {warning.message}" for warning in validation_warnings),
+            )
         if getattr(prepared, "pattern_band_hz", None) is not None:
             self._view.set_workflow_phase(OperationPhase.RUNNING)
             self._view.show_status("Preparing continuous speaker package...")

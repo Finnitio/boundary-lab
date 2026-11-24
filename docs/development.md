@@ -83,6 +83,29 @@ python -m ruff format --check pyproject.toml scripts src tests
 python -m pytest
 ```
 
+`python -m pytest` deselects tests marked `slow` (`addopts = ["-m", "not slow"]`
+in `pyproject.toml`). These solver-backed tests start a BEAT Engine Julia
+worker, so they need Julia on `PATH` (or `BLAB_JULIA_EXE`) and an
+instantiated engine environment (`python -m beat_engine paths` shows where it
+lives). The first worker start precompiles the engine and can take minutes.
+Run them explicitly:
+
+```sh
+python -m pytest -m slow            # only the slow, solver-backed tests
+python -m pytest -m ""              # everything, slow tests included
+python -m pytest -m slow tests/test_porous_examples.py
+```
+
+Julia writes its compiled caches to the first entry of `JULIA_DEPOT_PATH`.
+To keep a worktree's caches apart from your default depot while reusing its
+packages, stack a private depot in front of it, e.g.
+`JULIA_DEPOT_PATH="$PWD/.julia-depot:$HOME/.julia:"` (the trailing `:` keeps
+Julia's bundled depots). Export it in every shell that runs the tests; the
+worker inherits it. Older Julia integration tests are opt-in through
+environment variables instead (`BLAB_RUN_INTERIOR_FEM=1`,
+`BLAB_RUN_COUPLED_REFERENCE=1`, `BLAB_RUN_EXTERIOR_CPU=1`, `BLAB_RUN_COUPLED_CUDA=1`);
+their skip reasons name the variable.
+
 Use a uniquely versioned BEAT prerelease for cross-repository feature work, then
 restore the released wheel/hash pin before merging the application change.
 Development main uses a `.dev0` Python version until a release PR selects a unique

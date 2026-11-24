@@ -21,6 +21,43 @@ Check validation's `solve_kind`, `backend_id`, frequency range, excitation IDs a
 
 Omit `--request` to use the project's saved sweep and observations. Omit `--backend` for automatic selection, which can launch Julia to probe CUDA and falls back to CPU. Explicit `beat_cpu` skips that probe.
 
+The JSON summary from `validate` also lists:
+
+- `region_materials`: each region's normalized material as sent to the engine,
+  as `{region_id, name, kind, material}`. `material` holds `model` (`air`,
+  `jca`, or `jcal`), `frame` for porous models, and the SI parameters. Legacy
+  `{}` and `{"bulk_loss_factor": η}` appear as explicit `air`. The editor's
+  `preset` name is not included.
+- `region_seams`: faces shared by two bounded regions on one mesh without a
+  boundary assignment, as `{region_ids, mesh_id, face_count}`. Sound passes
+  through these faces. The list is `[]` when there are none. A shared face
+  assigned in only one region is a validation error.
+- `warnings`: findings that do not block a solve, as
+  `{code, region_id, message}`. The list is `[]` when there are none. The text
+  output of `validate` prints each one as a `warning: [code] message` line.
+
+Warning codes:
+
+- `porous_mesh_too_coarse` flags a porous region whose mean tetrahedron edge
+  is longer than the BEAT Engine convergence-study threshold at the maximum
+  solve frequency: 11 P1 or 3 P2 elements per porous wavelength, about 5 %
+  input-impedance error. The maximum includes a `--request` overlay's
+  frequencies. The message gives the needed edge length. Remesh that region's
+  volume with that element size or smaller.
+- `porous_thermal_length_below_viscous_length` flags a JCA/JCAL material whose
+  thermal characteristic length Λ′ is smaller than its viscous length Λ. This is
+  unusual for measured data.
+
+Coupled projects with porous regions solve on `beat_cpu` and `beat_cuda` only;
+`validate` and `solve` reject them on `beat_rocm` and `beat_metal` before a
+worker starts, naming the backend. Interior-only porous projects always solve on
+CPU and are accepted with any backend. The material contract is described in
+[Physical System Model](../Physical%20System%20Model.md#materials).
+`examples/filled_tube` (an interior tube filled with JCA),
+`examples/porous_layer_tube` (air in front of a porous layer on one mesh, joined
+by a region seam) and `examples/radiating_filled_tube` (a filled tube radiating
+through an FEM-BEM interface) are small porous projects for checking the workflow.
+
 ### Solve request overlays
 
 Choose inputs **before** the solve according to the report you want afterward. Overlay coordinates are in project metres (+Z forward).
@@ -71,7 +108,7 @@ JSON returns project coordinates, region masks, complex pressure and particle ve
 
 ### Result artifact
 
-For provenance or a custom reader, open `manifest.json` first. It records project and mesh hashes, backend, solver options, phasor convention, completion mask and per-frequency file references. The run also contains the project snapshot, request, compiled system, domain coordinates/topology, and per-frequency JSON descriptors and NPZ arrays. [Run provenance](BEAT%20Run%20Provenance.md) · [Phasor convention](Phasor%20Convention.md)
+For provenance or a custom reader, open `manifest.json` first. It records project and mesh hashes, backend, solver options, phasor convention, completion mask and per-frequency file references, plus the validation `region_materials`, `region_seams` and `warnings` described above, so a run made despite a warning keeps that finding. The run also contains the project snapshot, request, compiled system, domain coordinates/topology, and per-frequency JSON descriptors and NPZ arrays. [Run provenance](BEAT%20Run%20Provenance.md) · [Phasor convention](Phasor%20Convention.md)
 
 ### Task-specific references
 

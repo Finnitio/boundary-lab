@@ -5,7 +5,7 @@ from __future__ import annotations
 import meshio
 import numpy as np
 
-from blab.fem_topology import select_tetrahedra
+from blab.fem_topology import selected_tetrahedra
 from blab.physical_compiler import PhysicalSystemCompiler
 from blab.physical_model import AcousticRegionKind, MeshPurpose, PhysicalSystem
 
@@ -78,7 +78,7 @@ def _interior_count(resource, mesh, groups):
         for group in groups
         if group.mesh_id == resource.id and group.dimension == 3
     }
-    cells = select_tetrahedra(mesh, tags)
+    cells = selected_tetrahedra(mesh, tags)
     if not cells.size:
         raise ValueError("No active tetrahedra")
     return np.unique(cells).size

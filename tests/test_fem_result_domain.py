@@ -4,7 +4,7 @@ import meshio
 import numpy as np
 import pytest
 
-from blab.solve_results.fem import _selected_tetrahedra
+from blab.fem_topology import selected_tetrahedra
 
 
 def _mesh(cell_blocks, physical_blocks) -> meshio.Mesh:
@@ -19,7 +19,7 @@ def test_selected_tetrahedra_preserve_quadratic_nodes() -> None:
     cells = np.arange(10, dtype=np.int64).reshape(1, 10)
     mesh = _mesh([("tetra10", cells)], [np.asarray([7])])
 
-    selected = _selected_tetrahedra(mesh, {7})
+    selected = selected_tetrahedra(mesh, {7})
 
     np.testing.assert_array_equal(selected, cells)
 
@@ -34,4 +34,4 @@ def test_selected_tetrahedra_reject_mixed_orders() -> None:
     )
 
     with pytest.raises(ValueError, match="mixes first- and second-order"):
-        _selected_tetrahedra(mesh, {7})
+        selected_tetrahedra(mesh, {7})

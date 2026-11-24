@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from blab.fem_topology import select_tetrahedra as _selected_tetrahedra
+from blab.fem_topology import selected_tetrahedra, tetrahedron_element_order
 from blab.mesh_data import read_resource_mesh
 from blab.physical_model import AcousticRegionKind, CompiledPhysicalSystem
 from blab.solve_results.model import FEM_VOLUME_DOMAIN_ID, ResultDomain
@@ -53,18 +53,18 @@ def fem_volume_result_domain(system: CompiledPhysicalSystem, *, symmetry: str = 
             raise ValueError(f"Bounded region {region.id!r} does not select a physical volume group.")
 
         mesh = read_resource_mesh(resource)
-        selected_tetrahedra = _selected_tetrahedra(mesh, selected_tags)
-        if not selected_tetrahedra.size:
+        region_tetrahedra = selected_tetrahedra(mesh, selected_tags)
+        if not region_tetrahedra.size:
             raise ValueError(f"Bounded region {region.id!r} contains no selected tetrahedra.")
-        region_order = 2 if selected_tetrahedra.shape[1] == 10 else 1
+        region_order = tetrahedron_element_order(region_tetrahedra)
         if element_order is None:
             element_order = region_order
         elif region_order != element_order:
             raise ValueError("All bounded FEM regions must use the same tetrahedron order.")
-        active_vertices = np.unique(selected_tetrahedra.reshape(-1))
+        active_vertices = np.unique(region_tetrahedra.reshape(-1))
         source_to_local = np.full(len(mesh.points), -1, dtype=np.int64)
         source_to_local[active_vertices] = np.arange(active_vertices.size, dtype=np.int64)
-        local_tetrahedra = source_to_local[selected_tetrahedra]
+        local_tetrahedra = source_to_local[region_tetrahedra]
         if np.any(local_tetrahedra < 0):
             raise ValueError(f"Could not compact the FEM nodes for bounded region {region.id!r}.")
 
