@@ -39,7 +39,8 @@ def _request(path: Path) -> dict:
     project = load_headless_project(path)
     prepared = prepare_headless_solve(project, load_headless_solve_spec(None), backend_id="beat_cpu")
     request = system_solve_request_to_dict(prepared.request)
-    return json.loads(json.dumps(request).replace(str(path.parent), "<example>"))
+    # Escaped as JSON, so Windows backslashes match too.
+    return json.loads(json.dumps(request).replace(json.dumps(str(path.parent))[1:-1], "<example>"))
 
 
 def test_a_symmetric_coupled_project_with_a_porous_region_compiles_like_air(tmp_path: Path) -> None:

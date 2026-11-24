@@ -1,8 +1,9 @@
-"""Air-only example projects compile to the same engine request as before porous materials (5fefb98).
+"""Air-only example projects compile to the same engine request as without porous materials.
 
 Each digest is the SHA-256 of the compiled request (`system_solve_request_to_dict`, keys sorted) with
 mesh paths made relative to the example directory (derived meshes: to the working directory, whose
-``runs/`` receives them), generated at 5fefb98 with project frequencies.
+``runs/`` receives them), generated at 5fefb98 with project frequencies and regenerated for upstream
+v0.5.1 (c3d290b, no porous code), which compiles the same requests as this branch.
 A change here means air-only requests changed on the wire; regenerate only for an intended change.
 """
 
@@ -19,13 +20,13 @@ from blab.system_contract import system_solve_request_to_dict
 
 EXAMPLES = Path(__file__).parents[1] / "examples"
 AIR_ONLY_REQUEST_SHA256 = {
-    "2x12_CRAM": "e5da90a84b34e6ee53f7dd3ae40cc190e36fe41b82f61aa22d26848c82ba9bc4",
-    "F2B_FLH": "ab1e5538797b521f226d32660463f3899008a36307ceb6d98d9df7b954799608",
-    "Multi_region_SAWMOD": "8b9e06a9cbaaf0662cbf2d8f5ff6cf3dae81e79b3fd7f90b68404a34fe688445",
-    "S218BP": "a8a53871644b431a5c2c6bf47c9ed1711c3141a7a00c8bd0c1d471770ac7c5cf",
-    "SKRAM": "7c487aad2abb00c3d3f730209a08baa07e16830d0d04f6f6b9453a7d9b5a76a4",
-    "Simple_Sealed": "8d6f6cde6c3ab50e10060741540fe5a2a2746ad113b0284122b6bb4cf5b57239",
-    "Vented_Sub": "3ca2ee5872e0b534cad3e4b5535365e2bd7b94873da4d82a8e1aceeb48c3f7dd",
+    "2x12_CRAM": "75d71f548091aa0d74b6534c3d8bbc7aa3465a4462aad50b9ce713c2f3cec945",
+    "F2B_FLH": "2925077947df594f05edfae92baef27f6e427b0a999620e3d4778c09b087ae7b",
+    "Multi_region_SAWMOD": "513ec45701f7e6072c38e492b2e5a22952b4b93337d4e80bca6687601dc1e73e",
+    "S218BP": "1b3dc16acf90094dc369d29c296adce1982789acec2bfffc253ae82c14eab7a9",
+    "SKRAM": "61026221f04d955584cebd3b63f69c2f6ad267fda771dd9dbe7240eda3927b70",
+    "Simple_Sealed": "22016d71fdbc02607fed67b51225d52e223c1019b27d64c0765c1a619e2059fe",
+    "Vented_Sub": "a95a559912dcadc8b6d5f502ca173d720c9e11b59d39bc128a68d7e34a7c4643",
     "compression_driver": "13a0e9c4949c5a36d68dd5062028346e763444e8917e215ffa9b54eff72aed62",
 }
 

@@ -3,11 +3,22 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6.QtCore import QLocale
 from PySide6.QtWidgets import QApplication
 
 from blab.ui.material_editor import RegionMaterialDialog, region_material_label
 
 _APP = QApplication.instance() or QApplication([])
+
+
+@pytest.fixture(autouse=True)
+def _english_number_format():
+    """The fields use the locale's decimal separator; the expected texts are written with '.'."""
+    previous = QLocale()
+    QLocale.setDefault(QLocale(QLocale.Language.English, QLocale.Country.UnitedStates))
+    yield
+    QLocale.setDefault(previous)
+
 
 # Glass wool, Allard & Atalla 2nd ed. Table 11.8, as the project stores it (SI).
 GLASS_WOOL_JCA = {
