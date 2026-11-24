@@ -82,6 +82,7 @@ from blab.ui.operation_controllers import (
     GeometryController,
     SolveController,
 )
+from blab.ui.plot_marker import PlotMarker
 from blab.ui.plots import (
     ImpedanceCanvas,
     IsobarCanvas,
@@ -442,6 +443,7 @@ class MainWindow(
         self.max_spl_plot = MaxSplCanvas()
         self.max_spl_plot.calculate_action.triggered.connect(self.calculate_max_spl)
         self.spinorama_plot = SpinoramaCanvas()
+        self.plot_marker = PlotMarker(self)
         self.plot_entries = (
             PlotEntry(
                 "horizontal_isobar",
