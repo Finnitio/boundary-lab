@@ -80,8 +80,7 @@ def blank_cad_editor(main_window, monkeypatch):
     catalog = catalog_module.ProviderCatalog([ROOT], enabled=[PROVIDER])
     catalog.scan()
     monkeypatch.setattr(catalog_module, "_catalog", catalog)
-    main_window.preferences.default_geometry_provider = PROVIDER
-    main_window.add_generator_document()
+    main_window.add_generator_document(PROVIDER)
     return main_window._provider_editors[main_window.active_generator_document().id]
 
 
@@ -182,7 +181,7 @@ def test_a_face_shared_by_two_bodies_hides_under_both(cad_editor, qapp, tmp_path
 
 def test_sizing_settings_edit_the_source_and_show_the_target_size(cad_editor, main_window, qapp):
     editor, host = cad_editor
-    main_window.freq_max_spin.setValue(3430)
+    main_window.frequency_control.maximum_spin.setValue(3430)
     editor.spins["elements_per_wavelength"].setValue(10)
     wait(qapp, lambda: "3430" in editor.target_label.text())
 
@@ -202,7 +201,7 @@ def test_shown_sizes_use_the_project_sound_speed(cad_editor, main_window, qapp):
     from blab.physical_model import AcousticRegion, AcousticRegionKind, PhysicalSystem
 
     editor, _ = cad_editor
-    main_window.freq_max_spin.setValue(3430)
+    main_window.frequency_control.maximum_spin.setValue(3430)
     exterior = AcousticRegion("air", "Exterior air", AcousticRegionKind.UNBOUNDED_AIR, (), sound_speed_m_per_s=686.0)
     main_window.project.physical_system = PhysicalSystem("system", "System", (), (exterior,), ())
     editor.spins["elements_per_wavelength"].setValue(10)  # an edit fetches the project context
@@ -226,7 +225,7 @@ def test_host_generate_accepts_locked_meshes_and_system_entries(cad_editor, main
     monkeypatch.setattr(geometry_workflow, "GENERATED_GEOMETRY_ROOT", tmp_path / "runs")
     errors = []
     monkeypatch.setattr(main_window, "show_error", lambda *args: errors.append(args))
-    main_window.freq_max_spin.setValue(3430)
+    main_window.frequency_control.maximum_spin.setValue(3430)
 
     host.generate(expected_revision=host.snapshot().revision)
     assert not editor.spins["growth_rate"].isEnabled()  # busy while the host generates
@@ -704,7 +703,7 @@ def test_designs_with_no_body_or_face_group_sizes_are_left_as_they_are(
     cad_editor, main_window, monkeypatch, qapp, tmp_path
 ):
     editor, host = cad_editor
-    main_window.freq_max_spin.setValue(3430)
+    main_window.frequency_control.maximum_spin.setValue(3430)
     editor.spins["curvature_elements_per_circle"].setValue(13)  # an edit fetches the project context
     wait(qapp, lambda: "3430" in editor.target_label.text())
     empty = host.snapshot().source | {"body_sizes": {}, "face_group_sizes": {}}  # as earlier slices saved them
@@ -729,7 +728,7 @@ def test_existing_designs_get_the_face_and_volume_sizes_that_applied_before(cad_
     from test_cad_import_provider import generate, make_project, median_edge, tet_count
 
     editor, host = cad_editor
-    main_window.freq_max_spin.setValue(3430)
+    main_window.frequency_control.maximum_spin.setValue(3430)
     editor.spins["curvature_elements_per_circle"].setValue(13)  # an edit fetches the project context
     wait(qapp, lambda: "3430" in editor.target_label.text())
     legacy = {
@@ -770,7 +769,7 @@ def test_mesh_fineness_levels_set_elements_per_wavelength_and_name_the_frequency
     cad_editor, main_window, qapp
 ):
     editor, host = cad_editor
-    main_window.freq_max_spin.setValue(3000)
+    main_window.frequency_control.maximum_spin.setValue(3000)
     editor.spins["curvature_elements_per_circle"].setValue(13)  # an edit fetches the project context
     wait(qapp, lambda: "3000" in editor.target_label.text())
     fineness, custom = editor.fineness, editor.spins["elements_per_wavelength"]
@@ -826,7 +825,7 @@ def test_bem_mesh_fineness_levels_write_elements_per_wavelength_and_name_their_e
     cad_editor, main_window, qapp
 ):
     editor, host = cad_editor
-    main_window.freq_max_spin.setValue(3430)
+    main_window.frequency_control.maximum_spin.setValue(3430)
     editor.spins["curvature_elements_per_circle"].setValue(13)  # an edit fetches the project context
     wait(qapp, lambda: "3430" in editor.target_label.text())
     bem, custom = editor.bem_fineness, editor.spins["bem_elements_per_wavelength"]
@@ -1828,7 +1827,7 @@ def test_open_step_starts_in_the_folder_last_used(blank_cad_editor, monkeypatch,
     assert host.snapshot().source["step_path"] == str(step)
 
     main_window = editor.widget.window()
-    main_window.add_generator_document()  # another CAD design starts where the last file was
+    main_window.add_generator_document(PROVIDER)  # another CAD design starts where the last file was
     other, _ = main_window._provider_editors[main_window.active_generator_document().id]
     other.browse_button.click()
 
