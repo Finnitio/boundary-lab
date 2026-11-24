@@ -342,6 +342,17 @@ def test_volume_size_coarsens_the_interior_only(vented, tmp_path):
     assert np.median(chamber_edges(result, "triangle", "walls")) == pytest.approx(walls, rel=0.1)
 
 
+@pytest.mark.parametrize("size_m", [0.01, 0.006])
+def test_a_volume_size_is_the_mean_tetrahedron_edge_of_the_interior(tmp_path, size_m):
+    # The porous mesh check compares the mean tetrahedron edge with the edge it needs and asks for that volume size;
+    # Gmsh's tetrahedra average about 1.3 times the size it is given, so the size must be scaled for it.
+    settings = replace(SETTINGS, volume_sizes={"Chamber": CadSizeOverride(size_m=size_m)})  # faces stay at 20 mm
+    result = mesh_step(vented_box(tmp_path / "box.step"), settings, tmp_path / "out")
+    mean_edge = np.mean(edge_lengths(read(result, "chamber"), "tetra", group="Chamber"))  # as the check measures
+
+    assert 0.8 * size_m < mean_edge <= size_m
+
+
 def face_edges_and_tets(result):
     """``({(mesh id, face id): sorted triangle edge lengths}, {mesh id: tet count})`` of a meshing result."""
     faces, tets = {}, {}

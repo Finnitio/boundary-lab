@@ -33,6 +33,12 @@ _GMSH_LOCK = threading.RLock()
 # Metres per Gmsh model unit. The model is in millimetres: OpenCASCADE's fixed tolerance (1e-7 model units) is
 # coarser than CAD accuracy in metres, and fragmenting there collapsed faces of some models to zero area.
 _MM = 1e-3
+# A volume sized by an edge length (its mean tetrahedron edge) starts at that edge over this ratio: Gmsh's
+# tetrahedra average about 1.3 (bulk) to 1.5 (next to coarser faces) times the size they are given. Interiors
+# still too coarse are remeshed up to _EDGE_PASSES times with a size scaled by the measured excess and a margin.
+_TETRAHEDRON_EDGE_RATIO = 1.3
+_EDGE_PASSES = 3
+_EDGE_MARGIN = 0.97
 
 
 @dataclass(frozen=True)
@@ -453,9 +459,10 @@ def mesh_step(step_path: str | Path, settings: CadImportSettings, output_dir: st
         if unmeshable := _mesh_surfaces(gmsh, geometry.faces):
             raise ValueError(_unmeshable_message(geometry, unmeshable))
         gmsh.model.mesh.clear()
-        _apply_sizes(gmsh, model, settings, groups)
+        edges = _apply_sizes(gmsh, model, settings, groups)
         try:
             gmsh.model.mesh.generate(3)
+            _hold_volume_edges(gmsh, model, edges)
         except Exception:  # Gmsh raises plain Exceptions; name the faces if the 2D mesher is to blame
             gmsh.model.mesh.clear()
             if unmeshable := _mesh_surfaces(gmsh, geometry.faces):
@@ -972,14 +979,25 @@ def _step_face_vertices(path) -> list[tuple[str, np.ndarray]]:
 # --- meshing --------------------------------------------------------------------------------------
 
 
-def _apply_sizes(gmsh, model: _Model, settings: CadImportSettings, groups) -> None:
+@dataclass
+class _VolumeEdges:
+    """The interiors whose size is an edge length, which is their mean tetrahedron edge (Gmsh model units): air
+    body -> ``(Constant field, edge, the size the field gives)``."""
+
+    caps: dict[str, tuple[int, float, float]]
+
+
+def _apply_sizes(gmsh, model: _Model, settings: CadImportSettings, groups) -> _VolumeEdges:
     """Apply the size plan (:func:`size_plan`) and the target sizes of faces in use: size options, fields and
-    grading by the growth rate."""
+    grading by the growth rate. Returns the interiors :func:`_hold_volume_edges` keeps at their edge length."""
     sizing = settings.sizing
     targets = sizing.face_targets(model.geometry)
     plan = size_plan(settings, model.geometry, groups)
     face_size = {f: edge / _MM for f, edge in plan.face_m.items()}  # in Gmsh model units, as all sizes below
     volume_size = {b: edge / _MM for b, edge in plan.volume_m.items()}
+    edges = {b: volume_size[b] for b in volume_size if _edge_length_override(settings, b)}
+    # Gmsh's tetrahedra are longer than the size it is given; an edge length starts at the size that usually gives it.
+    volume_size |= {b: edge / _TETRAHEDRON_EDGE_RATIO for b, edge in edges.items()}
     # The finest target size in use: the faces' and, with air bodies, the FEM one of their volumes.
     in_use = [sizing.edge_m(targets[f]) for f in face_size] + ([sizing.target_size_m] if volume_size else [])
     target = min(in_use, default=sizing.target_size_m) / _MM
@@ -991,7 +1009,7 @@ def _apply_sizes(gmsh, model: _Model, settings: CadImportSettings, groups) -> No
     option("Mesh.MeshSizeMax", largest)
     option("Mesh.MeshSizeFromCurvature", settings.curvature_elements_per_circle)
     if smallest == largest:
-        return
+        return _VolumeEdges({})
     coarsest_face = defaultdict(float)
     for f, bodies in model.face_bodies.items():
         for body in bodies:
@@ -1005,7 +1023,7 @@ def _apply_sizes(gmsh, model: _Model, settings: CadImportSettings, groups) -> No
     mesh_volumes = defaultdict(list)
     for body, volumes in model.volumes.items():
         mesh_volumes[region_of[body]].extend(volumes)
-    ramps = []
+    ramps, caps = [], {}
     # A face refines only the meshes it belongs to, not air bodies that are merely nearby.
     classes = defaultdict(list)
     for f, size in face_size.items():
@@ -1033,9 +1051,59 @@ def _apply_sizes(gmsh, model: _Model, settings: CadImportSettings, groups) -> No
             fields.setNumber(cap, "VOut", largest)
             fields.setNumber(cap, "IncludeBoundary", 0)
             ramps.append(cap)
+            if body in edges:
+                caps[body] = (cap, edges[body], size)
     combined = fields.add("Min")
     fields.setNumbers(combined, "FieldsList", ramps)
     fields.setAsBackgroundMesh(combined)
+    return _VolumeEdges(caps)
+
+
+def _edge_length_override(settings: CadImportSettings, body: str) -> bool:
+    """Whether air body ``body``'s volume is sized by an edge length (not a mesh fineness or Global)."""
+    size = settings.volume_sizes.get(body) or settings.body_sizes.get(body)
+    return size is not None and size.size_m is not None
+
+
+def _hold_volume_edges(gmsh, model: _Model, edges: _VolumeEdges) -> None:
+    """Remesh each interior whose mean tetrahedron edge exceeds its edge length with a size scaled by the excess,
+    at most :data:`_EDGE_PASSES` times; the surface meshes stay. How much longer than their size Gmsh's tetrahedra
+    come out depends on the body and its face sizes, so it is measured rather than assumed."""
+    fields = gmsh.model.mesh.field
+    for _ in range(_EDGE_PASSES):
+        over = {}
+        for body, (cap, edge, size) in edges.caps.items():
+            mean = _mean_tetrahedron_edge(gmsh, model.volumes[body])
+            if mean > edge:
+                over[body] = (cap, edge, size * edge / mean * _EDGE_MARGIN)
+        if not over:
+            return
+        for body, (cap, _, size) in over.items():
+            fields.setNumber(cap, "VIn", size)
+            edges.caps[body] = over[body]
+        floor = gmsh.option.getNumber("Mesh.MeshSizeMin")
+        gmsh.option.setNumber("Mesh.MeshSizeMin", min(floor, *(size for _, _, size in over.values())))
+        gmsh.model.mesh.clear([(3, v) for body in over for v in model.volumes[body]])
+        gmsh.model.mesh.generate(3)
+
+
+def _mean_tetrahedron_edge(gmsh, volumes) -> float:
+    """The mean corner-to-corner edge of the tetrahedra of ``volumes`` (Gmsh model units), as the porous mesh check
+    measures it: repeated edges included."""
+    corners = []
+    for volume in volumes:
+        types, _, nodes = gmsh.model.mesh.getElements(3, volume)
+        for element_type, tags in zip(types, nodes, strict=True):
+            count = gmsh.model.mesh.getElementProperties(element_type)[3]
+            corners.append(tags.reshape(-1, count)[:, :4])
+    if not corners:
+        return 0.0
+    tags, coords, _ = gmsh.model.mesh.getNodes()
+    points = np.zeros((int(tags.max()) + 1, 3))
+    points[tags] = coords.reshape(-1, 3)
+    vertices = points[np.vstack(corners).astype(np.int64)]
+    pairs = ((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3))
+    return float(np.mean([np.linalg.norm(vertices[:, b] - vertices[:, a], axis=1) for a, b in pairs]))
 
 
 def _write_volume(gmsh, path, surface_groups, volume_groups) -> None:
