@@ -564,9 +564,6 @@ class PhysicalSystemCompiler:
         """Warn per porous region whose mean tetrahedron edge exceeds the engine's convergence-study
         threshold (``porous_mesh_edge_length_m``) for its element order at ``freq_max_hz``."""
 
-        if not any(material_of_region(region).is_porous for region in regions):
-            return ()
-
         from beat_engine.beat_contract import porous_mesh_edge_length_m, porous_mesh_resolution
 
         warnings: list[ValidationWarning] = []
