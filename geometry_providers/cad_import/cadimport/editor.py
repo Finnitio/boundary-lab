@@ -90,6 +90,21 @@ class _Relay(QObject):
     loaded = Signal(object, object, object)  # key, preview or None, error or None
 
 
+class _ComboBox(QComboBox):
+    """A dropdown the mouse wheel changes only once it has focus (clicked or tabbed to): scrolling the tree or the
+    panel past it scrolls them instead of silently changing a mesh size, fineness or kind."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # not focused by the wheel
+
+    def wheelEvent(self, event):
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()  # to the parent, which scrolls
+
+
 class _WarningLabel(QLabel):
     """Red text: dark red on a light background, light red on a dark one, following theme changes."""
 
@@ -616,7 +631,7 @@ class CadImportEditor:
     def _fineness_row(self, form, method, key, levels, limits):
         """A ``method`` (FEM or BEM) mesh fineness dropdown of ``levels`` and Custom with a number field, a row of
         ``form`` writing source ``key``."""
-        combo = QComboBox()
+        combo = _ComboBox()
         for name, n in levels.items():
             combo.addItem(name, n)
         combo.addItem("Custom", None)
@@ -868,7 +883,7 @@ class CadImportEditor:
 
     def _add_kind_combo(self, item, name, role):
         """The Kind dropdown of closed shell ``name``'s body row; a change re-reads the file."""
-        combo = QComboBox()
+        combo = _ComboBox()
         combo.addItem("Air body", "air")
         combo.addItem("Exterior surface", "exterior")
         combo.setCurrentIndex(combo.findData(role))
@@ -1260,7 +1275,7 @@ class CadImportEditor:
 
     def _size_combo(self, face_ids, volumes):
         """A Mesh size dropdown writing to ``face_ids`` and air-body ``volumes``."""
-        combo = QComboBox()
+        combo = _ComboBox()
         combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)  # Global is named once shown
         combo.setAccessibleName("Mesh size")
         combo.addItem("", None)  # Global, named when shown

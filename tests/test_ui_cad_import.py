@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QMouseEvent, QPalette
+from PySide6.QtGui import QMouseEvent, QPalette, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QComboBox, QDockWidget, QHeaderView, QLabel, QScrollArea, QSplitter
 
@@ -541,6 +541,38 @@ def choose_size(combo, text, qapp):
 
 def child_row(body, text):
     return next(item for item in children_items(body) if item.text(0) == text)
+
+
+def scroll_over(widget, qapp):
+    """One mouse-wheel notch down over ``widget``, as when scrolling the panel past it."""
+    centre = QPointF(widget.rect().center())
+    global_centre = QPointF(widget.mapToGlobal(centre.toPoint()))
+    event = QWheelEvent(
+        centre, global_centre, QPoint(), QPoint(0, -120), Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False,
+    )  # fmt: skip
+    qapp.sendEvent(widget, event)
+    qapp.processEvents()
+    return event
+
+
+def test_scrolling_over_a_dropdown_scrolls_instead_of_changing_a_size_or_kind(cad_editor, qapp):
+    editor, host = cad_editor
+    chamber = body_items(editor)["Chamber"]
+    source = host.snapshot().source
+    combos = {
+        "Volume": lambda: size_combo(editor, child_row(chamber, "Volume")),  # Global: a notch down is FEM Fine
+        "body": lambda: size_combo(editor, chamber),
+        "face group": lambda: size_combo(editor, "walls"),
+        **{f"Kind of {name}": lambda name=name: editor.kind_combos[name] for name in editor.kind_combos},
+        **{key: lambda key=key: editor._fineness_combos[key][0] for key in editor._fineness_combos},
+    }
+
+    for name, combo in combos.items():
+        event = scroll_over(combo(), qapp)
+
+        assert host.snapshot().source == source, name
+        assert not event.isAccepted(), name  # left to the tree or panel, which scrolls
 
 
 def tree_rows(editor):
