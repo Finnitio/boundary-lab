@@ -28,7 +28,8 @@ class CadImportSettings:
     against; ``None`` accepts what is detected. ``closed_shells`` maps a closed shell name
     to ``"air"`` or ``"exterior"``; one without a choice gets its guessed kind (see
     :class:`CadClosedShell`). ``interface_names`` renames interfaces by
-    their detected name; names of interfaces not detected are ignored.
+    their detected name; names of interfaces not detected are ignored. ``own_regions`` names the air bodies
+    meshed with the air they touch but reported as regions of their own ("Air, own region").
 
     ``elements_per_wavelength`` is the FEM mesh fineness, sizing air-body volumes and faces;
     ``bem_elements_per_wavelength`` the BEM one, sizing exterior surface faces (``None``: the FEM
@@ -57,6 +58,7 @@ class CadImportSettings:
     rotation_deg: tuple[float, float, float] = ZERO
     translation_m: tuple[float, float, float] = ZERO
     interface_names: Mapping[str, str] = field(default_factory=dict)
+    own_regions: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         bem = self.bem_elements_per_wavelength
@@ -73,6 +75,7 @@ class CadImportSettings:
             raise ValueError("Growth rate must be greater than 1.")
         object.__setattr__(self, "rotation_deg", tuple(self.rotation_deg))
         object.__setattr__(self, "translation_m", tuple(self.translation_m))
+        object.__setattr__(self, "own_regions", tuple(self.own_regions))
         _placement(**self.placement)
         groups = {
             name: tuple(CadFaceRef(**face) if isinstance(face, Mapping) else face for face in faces)

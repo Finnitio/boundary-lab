@@ -26,6 +26,7 @@ from cad_fixtures import (
     two_chambers,
     vented_box,
     waveguide,
+    write_step,
 )
 from cad_plugin import (
     LEVELS,
@@ -167,6 +168,46 @@ def test_multipart_port_does_not_hide_exterior_gaps_or_overlaps(tmp_path, fault)
         assert any("open edge" in warning for warning in geometry.warnings)
     else:
         assert any("overlap" in warning for warning in geometry.warnings)
+
+
+def tet_volume(mesh, group):
+    """Volume (m³) of the tetrahedra of one physical group."""
+    total = 0.0
+    for block, physical in zip(mesh.cells, mesh.cell_data["gmsh:physical"], strict=True):
+        if block.type == "tetra":
+            a, b, c, d = np.moveaxis(mesh.points[block.data[physical == mesh.field_data[group][0]]], 1, 0)
+            total += np.abs(np.einsum("ij,ij->i", np.cross(b - a, c - a), d - a)).sum() / 6
+    return total
+
+
+def test_an_air_body_inside_another_is_cut_out_of_it(tmp_path):
+    step = vented_box(tmp_path / "filled.step", fill=True)
+    preview = open_step(step)
+    bodies = {body.name: body for body in preview.geometry.bodies}
+
+    # Its faces all touch the chamber: region seams, like the port's inner end, so none is listed.
+    assert bodies["Fill"].kind == "air" and bodies["Fill"].face_ids == ()
+    assert [r.bodies for r in preview.geometry.regions if r.kind == "bounded_air"] == [("Chamber", "Port", "Fill")]
+    assert not any("overlap" in warning for warning in preview.geometry.warnings)
+
+    result = mesh_step(step, SETTINGS, tmp_path / "out")
+    chamber = read(result, "chamber")
+    assert groups(next(mesh.path for mesh in result.meshes if mesh.id == "chamber"))[3] == ["Chamber", "Fill", "Port"]
+    assert tet_volume(chamber, "Fill") == pytest.approx(0.04**3, rel=1e-6)
+    assert tet_volume(chamber, "Chamber") == pytest.approx(0.1 * 0.1 * 0.18 - 0.04**3, rel=1e-6)
+
+
+def test_partly_overlapping_air_bodies_open_with_a_warning_and_the_smaller_keeps_the_overlap(tmp_path):
+    def build():
+        occ = gmsh.model.occ
+        return [(3, occ.addBox(0, 0, 0, 100, 100, 100)), (3, occ.addBox(60, 20, 20, 60, 60, 60))], ["Big", "Small"]
+
+    geometry = open_step(write_step(tmp_path / "overlap.step", build)).geometry
+    bodies = {body.name: body for body in geometry.bodies}
+
+    assert set(bodies) == {"Big", "Small"}
+    assert [r.bodies for r in geometry.regions] == [("Big", "Small")]
+    assert any("'Big' and 'Small' overlap" in w and "'Small'" in w for w in geometry.warnings)
 
 
 def edge_lengths(mesh, cell_type="triangle", group=None):

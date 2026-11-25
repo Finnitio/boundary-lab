@@ -17,36 +17,48 @@ def configuration_patch(request, result: CadImportResult):
     doc = request.document_id
     system = request.configuration.get("physical_system") or {}
     regions = {r["id"]: r for r in system.get("regions", [])}
-    boundaries = {b["id"] for b in system.get("boundaries", [])}
+    boundaries = {b["id"]: b.get("region_id") for b in system.get("boundaries", [])}
     exterior_region = next((r["id"] for r in regions.values() if r["kind"] == "unbounded_air"), f"{doc}/exterior")
     region_upserts, boundary_upserts, interfaces = [], [], []
     interface_names = {i.name for i in result.geometry.interfaces}
     for mesh in result.meshes:
         mesh_id = generated_mesh_id(doc, mesh.id)
+        region_of_group = {}
         if mesh.purpose == "fem_volume":
             region_id = f"{doc}/{mesh.id}"
-            region = dict(
-                id=region_id,
-                kind="bounded_air",
-                mesh_ids=[mesh_id],
-                volume_groups=[dict(mesh_id=mesh_id, dimension=3, name=name) for name in mesh.volume_groups],
-            )
-            if region_id not in regions:
-                region["name"] = f"{request.mesh_name} {', '.join(mesh.volume_groups)}"
-            region_upserts.append(region)
+            own = {r.body for r in mesh.own_regions}
+            # The cluster region keeps the other bodies; each own-region body is a region on the same mesh, so the
+            # faces it shares with them are region seams. No loss model is sent: the host keeps the user's material.
+            bounded = [(region_id, [b for b in mesh.volume_groups if b not in own])]
+            for own_region in mesh.own_regions:
+                bounded.append((f"{region_id}/{own_region.body}", [own_region.body]))
+                region_of_group.update(dict.fromkeys(own_region.surface_groups, bounded[-1][0]))
+            for bounded_id, bodies in bounded:
+                region = dict(
+                    id=bounded_id,
+                    kind="bounded_air",
+                    mesh_ids=[mesh_id],
+                    volume_groups=[dict(mesh_id=mesh_id, dimension=3, name=name) for name in bodies],
+                )
+                if bounded_id not in regions:
+                    region["name"] = f"{request.mesh_name} {', '.join(bodies)}"
+                region_upserts.append(region)
         else:
             region_id = exterior_region
             if region_id not in regions:
                 region_upserts.append(dict(id=region_id, name="Exterior air", kind="unbounded_air", mesh_ids=[mesh_id]))
         for group in mesh.surface_groups:
             boundary_id = f"{doc}/{mesh.id}/{group}"
+            group_region = region_of_group.get(group, region_id)
             if boundary_id in boundaries:
+                if boundaries[boundary_id] != group_region:  # its body was switched to or from its own region
+                    boundary_upserts.append(dict(id=boundary_id, region_id=group_region))
                 continue
             boundary_upserts.append(
                 dict(
                     id=boundary_id,
                     name=f"{request.mesh_name} {mesh.id} {group}",
-                    region_id=region_id,
+                    region_id=group_region,
                     group=dict(mesh_id=mesh_id, dimension=2, name=group),
                     kind="interface" if group in interface_names else "rigid",
                 )
@@ -77,13 +89,26 @@ def configuration_patch(request, result: CadImportResult):
 def _remove_stale(patch, system, doc, meshes):
     """Remove this design's boundaries whose face group is gone, with what depends on them, in ``patch``.
 
-    Their interfaces go, and so do bounded regions whose mesh is gone. Components keep their
-    other boundaries; a component left without any is removed with its excitation ports.
+    Their interfaces go, and so do bounded regions whose mesh is gone and own regions of bodies no longer marked.
+    Components keep their other boundaries; a component left without any is removed with its excitation ports.
     """
     # Every mesh this design generates has an ID starting with this prefix.
     design_mesh_prefix = generated_mesh_id(doc, "")
     current_mesh_ids = {generated_mesh_id(doc, m.id) for m in meshes}
     current_groups = {(generated_mesh_id(doc, m.id), g) for m in meshes for g in m.surface_groups}
+    current_regions = {r["id"] for r in patch["regions"]["upsert"]}
+    own_region_prefixes = tuple(f"{doc}/{m.id}/" for m in meshes if m.purpose == "fem_volume")
+    stale_regions = sorted(
+        r["id"]
+        for r in system.get("regions", [])
+        if r["kind"] == "bounded_air"
+        and r["mesh_ids"]
+        and all(m.startswith(design_mesh_prefix) for m in r["mesh_ids"])
+        and (
+            all(m not in current_mesh_ids for m in r["mesh_ids"])
+            or (r["id"].startswith(own_region_prefixes) and r["id"] not in current_regions)
+        )
+    )
     design_boundaries = [
         b for b in system.get("boundaries", []) if b["group"]["mesh_id"].startswith(design_mesh_prefix)
     ]
@@ -91,8 +116,9 @@ def _remove_stale(patch, system, doc, meshes):
     stale = {
         b["id"] for b in design_boundaries if (b["group"]["mesh_id"], b["group"].get("name")) not in current_groups
     }
-    if not stale:
+    if not stale and not stale_regions:
         return patch
+    patch["regions"]["remove"] = stale_regions
     components, removed_components = [], []
     for component in system.get("components", []):
         kept = [b for b in component["boundary_ids"] if b not in stale]
@@ -105,13 +131,6 @@ def _remove_stale(patch, system, doc, meshes):
     patch["surface_assignments"]["remove"] = sorted(stale)
     patch["interfaces"]["remove"] = sorted(
         i["id"] for i in system.get("interfaces", []) if {i["bounded_boundary_id"], i["unbounded_boundary_id"]} & stale
-    )
-    patch["regions"]["remove"] = sorted(
-        r["id"]
-        for r in system.get("regions", [])
-        if r["kind"] == "bounded_air"
-        and r["mesh_ids"]
-        and all(m.startswith(design_mesh_prefix) and m not in current_mesh_ids for m in r["mesh_ids"])
     )
     patch["component_assignments"] = {"upsert": components, "remove": removed_components}
     patch["excitation_ports"] = {
